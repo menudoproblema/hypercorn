@@ -5,7 +5,7 @@ from unittest.mock import AsyncMock, call, Mock
 
 import pytest
 from h2.connection import H2Connection
-from h2.events import ConnectionTerminated
+from h2.events import ConnectionTerminated, DataReceived
 
 from hypercorn.asyncio.worker_context import EventWrapper, WorkerContext
 from hypercorn.config import Config
@@ -116,3 +116,27 @@ async def test_protocol_keep_alive_max_requests() -> None:
     protocol.send.assert_awaited()  # type: ignore
     events = client.receive_data(protocol.send.call_args_list[1].args[0].data)  # type: ignore
     assert isinstance(events[-1], ConnectionTerminated)
+
+
+@pytest.mark.asyncio
+async def test_protocol_ignores_data_received_for_closed_stream() -> None:
+    protocol = H2Protocol(
+        Mock(),
+        Config(),
+        WorkerContext(None),
+        AsyncMock(),
+        ConnectionState({}),
+        False,
+        None,
+        None,
+        AsyncMock(),
+    )
+    protocol.connection.acknowledge_received_data = Mock()  # type: ignore[method-assign]
+    protocol._flush = AsyncMock()  # type: ignore[method-assign]
+
+    await protocol._handle_events(
+        [DataReceived(stream_id=1, data=b"body", flow_controlled_length=4)]
+    )
+
+    protocol.connection.acknowledge_received_data.assert_not_called()
+    protocol._flush.assert_awaited_once()
