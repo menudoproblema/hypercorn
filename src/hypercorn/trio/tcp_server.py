@@ -109,7 +109,8 @@ class TCPServer:
             ):
                 break
             else:
-                await self.protocol.handle(RawData(bytes(data)))
+                payload = data if isinstance(data, bytes) else bytes(data)
+                await self.protocol.handle(RawData(payload))
                 if data == b"":
                     break
         await self.protocol.handle(Closed())
