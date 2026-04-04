@@ -93,7 +93,7 @@ class H3Protocol:
 
     async def close(self) -> None:
         self.closed = True
-        await self.sender.wake()
+        await self.sender.close()
 
     async def _create_stream(self, request: HeadersReceived) -> None:
         for name, value in request.headers:

@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock, Mock
 import pytest
 
 from hypercorn.asyncio.worker_context import EventWrapper
-from hypercorn.protocol.h3_send import H3SendScheduler
+from hypercorn.protocol.h3_send import H3SendClosedError, H3SendScheduler
 
 
 class DummyTaskGroup:
@@ -63,3 +63,15 @@ async def test_send_scheduler_propagates_flush_errors() -> None:
     closed = True
     await scheduler.wake()
     await task_group.aclose()
+
+
+@pytest.mark.asyncio
+async def test_send_scheduler_rejects_operations_after_close() -> None:
+    connection = Mock()
+    flush = AsyncMock()
+    scheduler = H3SendScheduler(connection, EventWrapper, flush)
+
+    await scheduler.close()
+
+    with pytest.raises(H3SendClosedError, match="closed"):
+        await scheduler.data(1, b"hello")

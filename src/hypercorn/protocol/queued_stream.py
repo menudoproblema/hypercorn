@@ -82,9 +82,11 @@ class QueuedStream:
     ) -> None:
         queued_event = _QueuedEvent.create(event, callback)
         while True:
+            queue_empty = len(self._queue) == 0 and self._queued_bytes == 0
             has_count_space = self._max_queue_size == 0 or len(self._queue) < self._max_queue_size
             has_byte_space = (
                 self._max_queue_bytes == 0
+                or queue_empty
                 or (self._queued_bytes + queued_event.size_bytes) <= self._max_queue_bytes
             )
 

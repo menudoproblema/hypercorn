@@ -9,6 +9,10 @@ from ..typing import Event as IOEvent
 MAX_BATCHED_SENDS = 32
 
 
+class H3SendClosedError(RuntimeError):
+    pass
+
+
 @dataclass
 class _QueuedOperation:
     apply: Callable[[], bool]
@@ -27,14 +31,19 @@ class H3SendScheduler:
         self.flush = flush
         self.has_data = event_class()
         self._event_class = event_class
+        self._closed = False
         self._queue: deque[_QueuedOperation] = deque()
 
     async def run(self, should_stop: Callable[[], bool]) -> None:
-        while not should_stop():
+        while True:
+            if self._closed or should_stop():
+                await self._fail_pending(H3SendClosedError("H3 send scheduler is closed"))
+                break
             if not self._queue:
                 await self.has_data.wait()
                 await self.has_data.clear()
-                if should_stop():
+                if self._closed or should_stop():
+                    await self._fail_pending(H3SendClosedError("H3 send scheduler is closed"))
                     break
 
             await self._send_ready_batch()
@@ -52,13 +61,26 @@ class H3SendScheduler:
     async def wake(self) -> None:
         await self.has_data.set()
 
+    async def close(self) -> None:
+        self._closed = True
+        await self._fail_pending(H3SendClosedError("H3 send scheduler is closed"))
+        await self.has_data.set()
+
     async def _enqueue(self, apply: Callable[[], bool]) -> None:
+        if self._closed:
+            raise H3SendClosedError("H3 send scheduler is closed")
         operation = _QueuedOperation(apply=apply, complete=self._event_class())
         self._queue.append(operation)
         await self.has_data.set()
         await operation.complete.wait()
         if operation.error is not None:
             raise operation.error
+
+    async def _fail_pending(self, error: Exception) -> None:
+        while self._queue:
+            operation = self._queue.popleft()
+            operation.error = error
+            await operation.complete.set()
 
     async def _send_ready_batch(self) -> None:
         needs_flush = False

@@ -84,6 +84,38 @@ async def test_queued_stream_zero_max_queue_size_is_unbounded() -> None:
 
 
 @pytest.mark.asyncio
+async def test_queued_stream_allows_oversized_first_event() -> None:
+    class BlockingStream:
+        idle = False
+
+        def __init__(self) -> None:
+            self.started = asyncio.Event()
+            self.release = asyncio.Event()
+
+        async def handle(self, event: Body | StreamClosed) -> None:
+            if isinstance(event, Body):
+                self.started.set()
+                await self.release.wait()
+
+    task_group = DummyTaskGroup()
+    stream = BlockingStream()
+    queued = QueuedStream(
+        stream,
+        task_group,
+        WorkerContext(None),
+        max_queue_size=1,
+        max_queue_bytes=4,
+    )
+
+    await asyncio.wait_for(queued.handle(Body(stream_id=1, data=b"abcdef")), timeout=0.1)
+    await asyncio.wait_for(stream.started.wait(), timeout=0.1)
+
+    stream.release.set()
+    await queued.handle(StreamClosed(stream_id=1))
+    await task_group.aclose()
+
+
+@pytest.mark.asyncio
 async def test_queued_stream_coalesces_consecutive_body_events() -> None:
     class RecordingStream:
         idle = False
