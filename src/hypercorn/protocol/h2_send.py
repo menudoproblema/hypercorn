@@ -19,6 +19,8 @@ class BufferCompleteError(Exception):
 
 
 class StreamBuffer:
+    __slots__ = ("_chunks", "_head_offset", "_size", "_complete", "_is_empty", "_paused")
+
     def __init__(self, event_class: type[IOEvent]) -> None:
         self._chunks: deque[memoryview] = deque()
         self._head_offset = 0
