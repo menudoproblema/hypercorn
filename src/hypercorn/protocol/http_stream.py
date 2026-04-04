@@ -119,8 +119,9 @@ class HTTPStream:
                 self.closed = True
 
         elif isinstance(event, Body):
+            body = event.data if isinstance(event.data, bytes) else bytes(event.data)
             await self.app_put(
-                {"type": "http.request", "body": bytes(event.data), "more_body": True}
+                {"type": "http.request", "body": body, "more_body": True}
             )
         elif isinstance(event, EndBody):
             await self.app_put({"type": "http.request", "body": b"", "more_body": False})
@@ -189,8 +190,11 @@ class HTTPStream:
                     not suppress_body(self.scope["method"], int(self.response["status"]))
                     and message.get("body", b"") != b""
                 ):
+                    body = message.get("body", b"")
+                    if not isinstance(body, bytes):
+                        body = bytes(body)
                     await self.send(
-                        Body(stream_id=self.stream_id, data=bytes(message.get("body", b"")))
+                        Body(stream_id=self.stream_id, data=body)
                     )
 
                 if not message.get("more_body", False):

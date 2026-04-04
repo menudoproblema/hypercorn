@@ -118,6 +118,15 @@ async def test_handle_body(stream: HTTPStream) -> None:
 
 
 @pytest.mark.asyncio
+async def test_handle_body_memoryview(stream: HTTPStream) -> None:
+    await stream.handle(Body(stream_id=1, data=memoryview(b"data")))  # type: ignore[arg-type]
+    stream.app_put.assert_called()  # type: ignore
+    assert stream.app_put.call_args_list == [  # type: ignore
+        call({"type": "http.request", "body": b"data", "more_body": True})
+    ]
+
+
+@pytest.mark.asyncio
 async def test_handle_end_body(stream: HTTPStream) -> None:
     stream.app_put = AsyncMock()
     await stream.handle(EndBody(stream_id=1))
@@ -172,6 +181,55 @@ async def test_send_response(stream: HTTPStream) -> None:
         call(StreamClosed(stream_id=1)),
     ]
     stream.config._log.access.assert_called()
+
+
+@pytest.mark.asyncio
+async def test_send_response_reuses_bytes_body(stream: HTTPStream) -> None:
+    await stream.handle(
+        Request(
+            stream_id=1,
+            http_version="2",
+            headers=[],
+            raw_path=b"/?a=b",
+            method="GET",
+            state=ConnectionState({}),
+        )
+    )
+    await stream.app_send(
+        cast(HTTPResponseStartEvent, {"type": "http.response.start", "status": 200, "headers": []})
+    )
+    body = b"Body"
+    await stream.app_send(
+        cast(HTTPResponseBodyEvent, {"type": "http.response.body", "body": body})
+    )
+
+    sent_body = stream.send.call_args_list[1].args[0]
+    assert isinstance(sent_body, Body)
+    assert sent_body.data is body
+
+
+@pytest.mark.asyncio
+async def test_send_response_copies_non_bytes_body(stream: HTTPStream) -> None:
+    await stream.handle(
+        Request(
+            stream_id=1,
+            http_version="2",
+            headers=[],
+            raw_path=b"/?a=b",
+            method="GET",
+            state=ConnectionState({}),
+        )
+    )
+    await stream.app_send(
+        cast(HTTPResponseStartEvent, {"type": "http.response.start", "status": 200, "headers": []})
+    )
+    await stream.app_send(
+        cast(HTTPResponseBodyEvent, {"type": "http.response.body", "body": memoryview(b"Body")})  # type: ignore[arg-type]
+    )
+
+    sent_body = stream.send.call_args_list[1].args[0]
+    assert isinstance(sent_body, Body)
+    assert sent_body.data == b"Body"
 
 
 @pytest.mark.asyncio

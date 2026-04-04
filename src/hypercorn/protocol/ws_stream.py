@@ -281,7 +281,10 @@ class WSStream:
             elif message["type"] == "websocket.send" and self.state == ASGIWebsocketState.CONNECTED:
                 event: WSProtoEvent
                 if message.get("bytes") is not None:
-                    event = BytesMessage(data=bytes(message["bytes"]))
+                    data = message["bytes"]
+                    if not isinstance(data, bytes):
+                        data = bytes(data)
+                    event = BytesMessage(data=data)
                 elif not isinstance(message["text"], str):
                     raise TypeError(f"{message['text']} should be a str")
                 else:
@@ -323,6 +326,7 @@ class WSStream:
             elif isinstance(event, CloseConnection):
                 if self.connection.state == ConnectionState.REMOTE_CLOSING:
                     await self._send_wsproto_event(event.response())
+                    await self.send(EndData(stream_id=self.stream_id))
                 await self.send(StreamClosed(stream_id=self.stream_id))
 
     async def _send_error_response(self, status_code: int) -> None:
@@ -373,7 +377,10 @@ class WSStream:
             )
             self.state = ASGIWebsocketState.RESPONSE
         if not body_suppressed:
-            await self.send(Body(stream_id=self.stream_id, data=bytes(message.get("body", b""))))
+            body = message.get("body", b"")
+            if not isinstance(body, bytes):
+                body = bytes(body)
+            await self.send(Body(stream_id=self.stream_id, data=body))
         if not message.get("more_body", False):
             self.state = ASGIWebsocketState.HTTPCLOSED
             await self.send(EndBody(stream_id=self.stream_id))

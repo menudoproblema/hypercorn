@@ -6,6 +6,7 @@ from unittest.mock import AsyncMock, call, Mock
 
 import pytest
 import pytest_asyncio
+import wsproto.connection
 from wsproto.events import BytesMessage, TextMessage
 
 from hypercorn.asyncio.task_group import TaskGroup
@@ -252,6 +253,31 @@ async def test_handle_connection(stream: WSStream) -> None:
 
 
 @pytest.mark.asyncio
+async def test_handle_remote_close_sends_end_data_before_stream_closed(stream: WSStream) -> None:
+    await stream.handle(
+        Request(
+            stream_id=1,
+            http_version="2",
+            headers=[(b"sec-websocket-version", b"13")],
+            raw_path=b"/",
+            method="GET",
+            state=ConnectionState({}),
+        )
+    )
+    await stream.app_send(cast(WebsocketAcceptEvent, {"type": "websocket.accept"}))
+    stream.send.reset_mock()  # type: ignore[attr-defined]
+
+    client = wsproto.connection.Connection(wsproto.ConnectionType.CLIENT)
+    await stream.handle(Data(stream_id=1, data=client.send(wsproto.events.CloseConnection(code=1000))))
+
+    assert stream.send.call_args_list == [  # type: ignore
+        call(Data(stream_id=1, data=b"\x88\x02\x03\xe8")),
+        call(EndData(stream_id=1)),
+        call(StreamClosed(stream_id=1)),
+    ]
+
+
+@pytest.mark.asyncio
 async def test_handle_closed(stream: WSStream) -> None:
     await stream.handle(StreamClosed(stream_id=1))
     stream.app_put.assert_called()  # type: ignore
@@ -337,6 +363,32 @@ async def test_send_reject(stream: WSStream) -> None:
         call(EndBody(stream_id=1)),
     ]
     stream.config._log.access.assert_called()
+
+
+@pytest.mark.asyncio
+async def test_send_reject_reuses_bytes_body(stream: WSStream) -> None:
+    await stream.handle(
+        Request(
+            stream_id=1,
+            http_version="2",
+            headers=[(b"sec-websocket-version", b"13")],
+            raw_path=b"/",
+            method="GET",
+            state=ConnectionState({}),
+        )
+    )
+    await stream.app_send(
+        cast(
+            WebsocketResponseStartEvent,
+            {"type": "websocket.http.response.start", "status": 200, "headers": []},
+        ),
+    )
+    body = b"Body"
+    await stream.app_send(
+        cast(WebsocketResponseBodyEvent, {"type": "websocket.http.response.body", "body": body})
+    )
+
+    assert stream.send.call_args_list[1].args[0].data is body  # type: ignore[attr-defined]
 
 
 @pytest.mark.asyncio
@@ -439,6 +491,29 @@ async def test_send_connection(stream: WSStream) -> None:
         call(Data(stream_id=1, data=b"\x88\x02\x03\xe8")),
         call(EndData(stream_id=1)),
     ]
+
+
+@pytest.mark.asyncio
+async def test_send_connection_reuses_bytes_payload(stream: WSStream) -> None:
+    await stream.handle(
+        Request(
+            stream_id=1,
+            http_version="2",
+            headers=[(b"sec-websocket-version", b"13")],
+            raw_path=b"/",
+            method="GET",
+            state=ConnectionState({}),
+        )
+    )
+    await stream.app_send(cast(WebsocketAcceptEvent, {"type": "websocket.accept"}))
+    stream._send_wsproto_event = AsyncMock()  # type: ignore[method-assign]
+    payload = b"abc"
+
+    await stream.app_send(cast(WebsocketSendEvent, {"type": "websocket.send", "bytes": payload}))
+
+    event = stream._send_wsproto_event.await_args.args[0]  # type: ignore[attr-defined]
+    assert isinstance(event, BytesMessage)
+    assert event.data is payload
 
 
 @pytest.mark.asyncio
