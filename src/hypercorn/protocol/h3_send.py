@@ -6,7 +6,7 @@ from dataclasses import dataclass
 
 from ..typing import Event as IOEvent
 
-MAX_BATCHED_SENDS = 16
+MAX_BATCHED_SENDS = 32
 
 
 @dataclass
