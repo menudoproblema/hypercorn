@@ -14,7 +14,7 @@ from benchmarks._compare import (
     summarize_dataclass_runs,
     write_json_output,
 )
-from benchmarks.ws import WebsocketBenchmarkConfig, run_ws_benchmark
+from benchmarks.h3 import H3BenchmarkConfig, run_h3_benchmark
 
 
 async def main() -> int:
@@ -28,21 +28,20 @@ async def main() -> int:
     else:
         cleanup, baseline_repo = create_worktree(args.baseline_ref, fetch=not args.no_fetch)
 
-    config = WebsocketBenchmarkConfig(
-        tls=args.tls,
+    config = H3BenchmarkConfig(
         path=args.path,
-        warmup_messages=args.warmup_messages,
-        measured_messages=args.measured_messages,
-        payload_size=args.payload_size,
+        concurrency=args.concurrency,
+        total_requests=args.total_requests,
+        warmup_requests=args.warmup_requests,
     )
 
     try:
         current_runs, baseline_runs = await run_interleaved_async(
             args.runs,
-            lambda index: run_ws_benchmark(PROJECT_ROOT, f"current-ws-run-{index + 1}", config),
-            lambda index: run_ws_benchmark(
+            lambda index: run_h3_benchmark(PROJECT_ROOT, f"current-h3-run-{index + 1}", config),
+            lambda index: run_h3_benchmark(
                 baseline_repo,
-                f"baseline-{args.baseline_ref}-ws-run-{index + 1}",
+                f"baseline-{args.baseline_ref}-h3-run-{index + 1}",
                 config,
             ),
             interleave=not args.sequential,
@@ -52,19 +51,19 @@ async def main() -> int:
             cleanup()
 
     current = summarize_dataclass_runs(
-        "current-ws",
+        "current-h3",
         current_runs,
         extra_fields={
             "total_time_s": lambda runs: statistics.median(run.total_time_s for run in runs),
-            "messages_per_second": lambda runs: statistics.median(run.messages_per_second for run in runs),
+            "requests_per_second": lambda runs: statistics.median(run.requests_per_second for run in runs),
         },
     )
     baseline = summarize_dataclass_runs(
-        f"baseline-{args.baseline_ref}-ws",
+        f"baseline-{args.baseline_ref}-h3",
         baseline_runs,
         extra_fields={
             "total_time_s": lambda runs: statistics.median(run.total_time_s for run in runs),
-            "messages_per_second": lambda runs: statistics.median(run.messages_per_second for run in runs),
+            "requests_per_second": lambda runs: statistics.median(run.requests_per_second for run in runs),
         },
     )
     payload = {
@@ -74,9 +73,9 @@ async def main() -> int:
         **build_comparison_result(
             current,
             baseline,
-            throughput_field="messages_per_second",
-            throughput_delta_field="delta_messages_per_second",
-            throughput_improvement_field="improvement_messages_per_second_percent",
+            throughput_field="requests_per_second",
+            throughput_delta_field="delta_rps",
+            throughput_improvement_field="improvement_rps_percent",
         ),
     }
     write_json_output(payload, args.output_json)
@@ -84,16 +83,15 @@ async def main() -> int:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Compare local Hypercorn against upstream in websocket echo benchmarks.")
+    parser = argparse.ArgumentParser(description="Compare local Hypercorn against upstream in a real HTTP/3 benchmark.")
     parser.add_argument("--baseline-ref", default="upstream/main")
     parser.add_argument("--baseline-path")
     parser.add_argument("--no-fetch", action="store_true")
-    parser.add_argument("--tls", action="store_true")
-    parser.add_argument("--path", default="/ws")
-    parser.add_argument("--warmup-messages", type=int, default=50)
-    parser.add_argument("--measured-messages", type=int, default=300)
-    parser.add_argument("--payload-size", type=int, default=65536)
-    parser.add_argument("--runs", type=int, default=1)
+    parser.add_argument("--path", default="/fast")
+    parser.add_argument("--concurrency", type=int, default=50)
+    parser.add_argument("--total-requests", type=int, default=500)
+    parser.add_argument("--warmup-requests", type=int, default=50)
+    parser.add_argument("--runs", type=int, default=3)
     parser.add_argument("--sequential", action="store_true", help="Run all current runs and then all baseline runs.")
     parser.add_argument("--output-json")
     return parser

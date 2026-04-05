@@ -11,9 +11,7 @@ from pathlib import Path
 import wsproto
 import wsproto.events
 
-from benchmarks.run_load import ServerProcess, build_ssl_context, percentile
-
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
+from benchmarks._runtime import PROJECT_ROOT, ServerProcess, build_ssl_context, percentile
 
 
 @dataclass
@@ -85,7 +83,7 @@ async def run_ws_benchmark(
         reader, writer = await asyncio.open_connection(
             "127.0.0.1",
             server.port,
-            ssl=build_ssl_context() if config.tls else None,
+            ssl=build_ssl_context(alpn_protocols=["http/1.1"]) if config.tls else None,
             server_hostname="localhost" if config.tls else None,
         )
         client = wsproto.WSConnection(wsproto.ConnectionType.CLIENT)

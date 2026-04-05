@@ -2,16 +2,18 @@ from __future__ import annotations
 
 import argparse
 import asyncio
-import json
-import statistics
-import shutil
-import subprocess
-import tempfile
 from pathlib import Path
 
-from benchmarks.run_load import BenchmarkConfig, BenchmarkResult, percentile, run_benchmark
-
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
+from benchmarks._compare import (
+    PROJECT_ROOT,
+    build_comparison_result,
+    create_worktree,
+    methodology_name,
+    run_interleaved_async,
+    summarize_dataclass_runs,
+    write_json_output,
+)
+from benchmarks.run_load import BenchmarkConfig, run_benchmark
 
 
 async def main() -> int:
@@ -35,34 +37,28 @@ async def main() -> int:
         cleanup, baseline_repo = create_worktree(args.baseline_ref, fetch=not args.no_fetch)
 
     try:
-        current_runs = [
-            await run_benchmark(PROJECT_ROOT, f"current-run-{index + 1}", config)
-            for index in range(args.runs)
-        ]
-        baseline_runs = [
-            await run_benchmark(baseline_repo, f"baseline:{args.baseline_ref}-run-{index + 1}", config)
-            for index in range(args.runs)
-        ]
+        current_runs, baseline_runs = await run_interleaved_async(
+            args.runs,
+            lambda index: run_benchmark(PROJECT_ROOT, f"current-run-{index + 1}", config),
+            lambda index: run_benchmark(
+                baseline_repo,
+                f"baseline:{args.baseline_ref}-run-{index + 1}",
+                config,
+            ),
+            interleave=not args.sequential,
+        )
     finally:
         if cleanup is not None:
             cleanup()
 
-    current = aggregate_results("current", current_runs)
-    baseline = aggregate_results(f"baseline:{args.baseline_ref}", baseline_runs)
-    comparison = {
+    current = summarize_dataclass_runs("current", current_runs)
+    baseline = summarize_dataclass_runs(f"baseline:{args.baseline_ref}", baseline_runs)
+    payload = {
         "runs": args.runs,
-        "current": current.__dict__,
-        "baseline": baseline.__dict__,
-        "delta_mean_ms": current.mean_ms - baseline.mean_ms,
-        "delta_median_ms": current.median_ms - baseline.median_ms,
-        "delta_p95_ms": current.p95_ms - baseline.p95_ms,
-        "improvement_mean_percent": percentage_improvement(current.mean_ms, baseline.mean_ms),
-        "improvement_median_percent": percentage_improvement(current.median_ms, baseline.median_ms),
-        "improvement_p95_percent": percentage_improvement(current.p95_ms, baseline.p95_ms),
+        "methodology": methodology_name(sequential=args.sequential),
+        **build_comparison_result(current, baseline),
     }
-    print(json.dumps(comparison, indent=2))
-    if args.output_json is not None:
-        Path(args.output_json).write_text(json.dumps(comparison, indent=2) + "\n")
+    write_json_output(payload, args.output_json)
     return 0
 
 
@@ -78,61 +74,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--slow-chunk-size", type=int, default=4096)
     parser.add_argument("--slow-delay-ms", type=int, default=25)
     parser.add_argument("--runs", type=int, default=1)
+    parser.add_argument("--sequential", action="store_true", help="Run all current runs and then all baseline runs.")
     parser.add_argument("--output-json")
     return parser
-
-
-def create_worktree(ref: str, fetch: bool) -> tuple[callable, Path]:
-    if fetch:
-        subprocess.run(["git", "fetch", "upstream"], cwd=PROJECT_ROOT, check=True)
-
-    tempdir = Path(tempfile.mkdtemp(prefix="hypercorn-bench-"))
-    subprocess.run(
-        ["git", "worktree", "add", "--detach", str(tempdir), ref],
-        cwd=PROJECT_ROOT,
-        check=True,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-    )
-
-    def cleanup() -> None:
-        subprocess.run(
-            ["git", "worktree", "remove", "--force", str(tempdir)],
-            cwd=PROJECT_ROOT,
-            check=True,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-        )
-        shutil.rmtree(tempdir, ignore_errors=True)
-
-    return cleanup, tempdir
-
-
-def percentage_improvement(current: float, baseline: float) -> float:
-    if baseline == 0:
-        return 0.0
-    return ((baseline - current) / baseline) * 100
-
-
-def aggregate_results(label: str, runs: list[BenchmarkResult]) -> BenchmarkResult:
-    samples_ms = [sample for run in runs for sample in run.samples_ms]
-    first = runs[0]
-    return BenchmarkResult(
-        target_label=label,
-        server_repo=first.server_repo,
-        warmup_iterations=first.warmup_iterations,
-        measured_iterations=first.measured_iterations * len(runs),
-        fast_streams=first.fast_streams,
-        slow_chunks=first.slow_chunks,
-        slow_chunk_size=first.slow_chunk_size,
-        slow_delay_ms=first.slow_delay_ms,
-        samples_ms=samples_ms,
-        mean_ms=statistics.fmean(samples_ms),
-        median_ms=statistics.median(samples_ms),
-        p95_ms=percentile(samples_ms, 0.95),
-        minimum_ms=min(samples_ms),
-        maximum_ms=max(samples_ms),
-    )
 
 
 if __name__ == "__main__":

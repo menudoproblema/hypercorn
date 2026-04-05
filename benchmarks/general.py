@@ -10,9 +10,7 @@ from pathlib import Path
 
 import httpx
 
-from benchmarks.run_load import ServerProcess, percentile
-
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
+from benchmarks._runtime import PROJECT_ROOT, ServerProcess, percentile
 
 
 @dataclass

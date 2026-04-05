@@ -11,9 +11,7 @@ from pathlib import Path
 from h2.connection import H2Connection
 from h2.events import DataReceived, ResponseReceived, StreamEnded
 
-from benchmarks.run_load import ServerProcess, build_ssl_context, percentile
-
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
+from benchmarks._runtime import PROJECT_ROOT, ServerProcess, build_ssl_context, percentile
 
 
 @dataclass

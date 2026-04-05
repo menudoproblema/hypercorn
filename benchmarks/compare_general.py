@@ -2,15 +2,19 @@ from __future__ import annotations
 
 import argparse
 import asyncio
-import json
 import statistics
 from pathlib import Path
 
-from benchmarks.compare import create_worktree, percentage_improvement
-from benchmarks.general import GeneralBenchmarkConfig, GeneralBenchmarkResult, run_general_benchmark
-from benchmarks.run_load import percentile
-
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
+from benchmarks._compare import (
+    PROJECT_ROOT,
+    build_comparison_result,
+    create_worktree,
+    methodology_name,
+    run_interleaved_async,
+    summarize_dataclass_runs,
+    write_json_output,
+)
+from benchmarks.general import GeneralBenchmarkConfig, run_general_benchmark
 
 
 async def main() -> int:
@@ -40,38 +44,43 @@ async def main() -> int:
                 total_requests=args.total_requests,
                 warmup_requests=args.warmup_requests,
             )
-            current_runs = [
-                await run_general_benchmark(PROJECT_ROOT, f"current-{scenario_name}-run-{index + 1}", config)
-                for index in range(args.runs)
-            ]
-            baseline_runs = [
-                await run_general_benchmark(
+            current_runs, baseline_runs = await run_interleaved_async(
+                args.runs,
+                lambda index: run_general_benchmark(
+                    PROJECT_ROOT,
+                    f"current-{scenario_name}-run-{index + 1}",
+                    config,
+                ),
+                lambda index: run_general_benchmark(
                     baseline_repo,
                     f"baseline-{args.baseline_ref}-{scenario_name}-run-{index + 1}",
                     config,
-                )
-                for index in range(args.runs)
-            ]
-            current = aggregate_general_results(f"current-{scenario_name}", current_runs)
-            baseline = aggregate_general_results(
-                f"baseline-{args.baseline_ref}-{scenario_name}", baseline_runs
-            )
-            results[scenario_name] = {
-                "current": current.__dict__,
-                "baseline": baseline.__dict__,
-                "delta_mean_ms": current.mean_ms - baseline.mean_ms,
-                "delta_median_ms": current.median_ms - baseline.median_ms,
-                "delta_p95_ms": current.p95_ms - baseline.p95_ms,
-                "delta_rps": current.requests_per_second - baseline.requests_per_second,
-                "improvement_mean_percent": percentage_improvement(current.mean_ms, baseline.mean_ms),
-                "improvement_median_percent": percentage_improvement(current.median_ms, baseline.median_ms),
-                "improvement_p95_percent": percentage_improvement(current.p95_ms, baseline.p95_ms),
-                "improvement_rps_percent": (
-                    ((current.requests_per_second - baseline.requests_per_second) / baseline.requests_per_second) * 100
-                    if baseline.requests_per_second > 0
-                    else 0.0
                 ),
-            }
+                interleave=not args.sequential,
+            )
+            current = summarize_dataclass_runs(
+                f"current-{scenario_name}",
+                current_runs,
+                extra_fields={
+                    "total_time_s": lambda runs: statistics.median(run.total_time_s for run in runs),
+                    "requests_per_second": lambda runs: statistics.median(run.requests_per_second for run in runs),
+                },
+            )
+            baseline = summarize_dataclass_runs(
+                f"baseline-{args.baseline_ref}-{scenario_name}",
+                baseline_runs,
+                extra_fields={
+                    "total_time_s": lambda runs: statistics.median(run.total_time_s for run in runs),
+                    "requests_per_second": lambda runs: statistics.median(run.requests_per_second for run in runs),
+                },
+            )
+            results[scenario_name] = build_comparison_result(
+                current,
+                baseline,
+                throughput_field="requests_per_second",
+                throughput_delta_field="delta_rps",
+                throughput_improvement_field="improvement_rps_percent",
+            )
     finally:
         if cleanup is not None:
             cleanup()
@@ -79,14 +88,13 @@ async def main() -> int:
     payload = {
         "baseline_ref": args.baseline_ref,
         "runs": args.runs,
+        "methodology": methodology_name(sequential=args.sequential),
         "concurrency": args.concurrency,
         "total_requests": args.total_requests,
         "warmup_requests": args.warmup_requests,
         "results": results,
     }
-    print(json.dumps(payload, indent=2))
-    if args.output_json is not None:
-        Path(args.output_json).write_text(json.dumps(payload, indent=2) + "\n")
+    write_json_output(payload, args.output_json)
     return 0
 
 
@@ -100,35 +108,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--total-requests", type=int, default=500)
     parser.add_argument("--warmup-requests", type=int, default=50)
     parser.add_argument("--runs", type=int, default=1)
+    parser.add_argument("--sequential", action="store_true", help="Run all current runs and then all baseline runs.")
     parser.add_argument("--output-json")
     return parser
-
-
-def aggregate_general_results(
-    label: str, runs: list[GeneralBenchmarkResult]
-) -> GeneralBenchmarkResult:
-    samples_ms = [sample for run in runs for sample in run.samples_ms]
-    total_time_s = sum(run.total_time_s for run in runs)
-    total_requests = sum(run.total_requests for run in runs)
-    first = runs[0]
-    return GeneralBenchmarkResult(
-        target_label=label,
-        server_repo=first.server_repo,
-        http_version=first.http_version,
-        tls=first.tls,
-        path=first.path,
-        concurrency=first.concurrency,
-        total_requests=total_requests,
-        warmup_requests=first.warmup_requests,
-        total_time_s=total_time_s,
-        requests_per_second=(total_requests / total_time_s) if total_time_s > 0 else 0.0,
-        samples_ms=samples_ms,
-        mean_ms=statistics.fmean(samples_ms),
-        median_ms=statistics.median(samples_ms),
-        p95_ms=percentile(samples_ms, 0.95),
-        minimum_ms=min(samples_ms),
-        maximum_ms=max(samples_ms),
-    )
 
 
 if __name__ == "__main__":
