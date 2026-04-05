@@ -184,17 +184,17 @@ class WSStream:
         self.context = context
         self.task_group = task_group
         self.response: WebsocketResponseStartEvent
-        self.scope: WebsocketScope
+        self.scope: WebsocketScope | None = None
         self.send = send
         # RFC 8441 for HTTP/2 says use http or https, ASGI says ws or wss
         self.scheme = "wss" if ssl else "ws"
         self.server = server
-        self.start_time: float
+        self.start_time: float | None = None
         self.state = ASGIWebsocketState.HANDSHAKE
         self.stream_id = stream_id
 
-        self.connection: Connection
-        self.handshake: Handshake
+        self.connection: Connection | None = None
+        self.handshake: Handshake | None = None
 
     @property
     def idle(self) -> bool:
@@ -235,10 +235,13 @@ class WSStream:
                     self.app, self.config, self.scope, self.app_send
                 )
                 await self.app_put({"type": "websocket.connect"})
-        elif isinstance(event, (Body, Data)) and not self.handshake.accepted:
+        elif isinstance(event, (Body, Data)) and (
+            self.handshake is None or not self.handshake.accepted
+        ):
             await self._send_error_response(400)
             self.closed = True
         elif isinstance(event, (Body, Data)):
+            assert self.connection is not None
             self.connection.receive_data(event.data)
             await self._handle_events()
         elif isinstance(event, StreamClosed):
@@ -338,9 +341,10 @@ class WSStream:
             )
         )
         await self.send(EndBody(stream_id=self.stream_id))
-        await self.config.log.access(
-            self.scope, {"status": status_code, "headers": []}, time() - self.start_time
-        )
+        if self.scope is not None and self.start_time is not None:
+            await self.config.log.access(
+                self.scope, {"status": status_code, "headers": []}, time() - self.start_time
+            )
 
     async def _send_wsproto_event(self, event: WSProtoEvent) -> None:
         try:

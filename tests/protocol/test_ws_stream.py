@@ -232,6 +232,29 @@ async def test_handle_data_before_acceptance(stream: WSStream) -> None:
 
 
 @pytest.mark.asyncio
+async def test_handle_data_before_request_sends_error_without_crashing() -> None:
+    stream = WSStream(
+        AsyncMock(), Config(), WorkerContext(None), AsyncMock(), False, None, None, AsyncMock(), 1
+    )
+    stream.config._log = AsyncMock(spec=Logger)
+
+    await stream.handle(Data(stream_id=1, data=b"X"))
+
+    assert stream.closed
+    assert stream.send.call_args_list == [  # type: ignore[attr-defined]
+        call(
+            Response(
+                stream_id=1,
+                headers=[(b"content-length", b"0"), (b"connection", b"close")],
+                status_code=400,
+            )
+        ),
+        call(EndBody(stream_id=1)),
+    ]
+    stream.config._log.access.assert_not_called()
+
+
+@pytest.mark.asyncio
 async def test_handle_connection(stream: WSStream) -> None:
     await stream.handle(
         Request(
