@@ -98,6 +98,7 @@ class Config:
     max_requests: int | None = None
     max_requests_jitter: int = 0
     pid_path: str | None = None
+    quic_receive_queue_size: int = 128
     server_names: list[str] = []
     shutdown_timeout = 60 * SECONDS
     ssl_handshake_timeout = 60 * SECONDS
