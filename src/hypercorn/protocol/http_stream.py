@@ -60,16 +60,17 @@ class HTTPStream:
         stream_id: int,
     ) -> None:
         self.app = app
+        self.app_put: Callable[[dict], Awaitable[None]] | None = None
         self.client = client
         self.closed = False
         self.config = config
         self.context = context
         self.response: HTTPResponseStartEvent
-        self.scope: HTTPScope
+        self.scope: HTTPScope | None = None
         self.send = send
         self.scheme = "https" if ssl else "http"
         self.server = server
-        self.start_time: float
+        self.start_time: float | None = None
         self.state = ASGIHTTPState.REQUEST
         self.stream_id = stream_id
         self.task_group = task_group
@@ -119,15 +120,19 @@ class HTTPStream:
                 self.closed = True
 
         elif isinstance(event, Body):
-            body = event.data if isinstance(event.data, bytes) else bytes(event.data)
-            await self.app_put(
-                {"type": "http.request", "body": body, "more_body": True}
-            )
+            if self.app_put is not None:
+                body = event.data if isinstance(event.data, bytes) else bytes(event.data)
+                await self.app_put({"type": "http.request", "body": body, "more_body": True})
         elif isinstance(event, EndBody):
-            await self.app_put({"type": "http.request", "body": b"", "more_body": False})
+            if self.app_put is not None:
+                await self.app_put({"type": "http.request", "body": b"", "more_body": False})
         elif isinstance(event, StreamClosed):
             self.closed = True
-            if self.state != ASGIHTTPState.CLOSED:
+            if (
+                self.state != ASGIHTTPState.CLOSED
+                and self.scope is not None
+                and self.start_time is not None
+            ):
                 await self.config.log.access(self.scope, None, time() - self.start_time)
             if self.app_put is not None:
                 await self.app_put({"type": "http.disconnect"})

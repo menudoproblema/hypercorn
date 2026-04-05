@@ -118,6 +118,19 @@ async def test_handle_body(stream: HTTPStream) -> None:
 
 
 @pytest.mark.asyncio
+async def test_handle_body_before_request_is_ignored() -> None:
+    stream = HTTPStream(
+        AsyncMock(), Config(), WorkerContext(None), AsyncMock(), False, None, None, AsyncMock(), 1
+    )
+    stream.config._log = AsyncMock(spec=Logger)
+
+    await stream.handle(Body(stream_id=1, data=b"data"))
+
+    stream.send.assert_not_called()  # type: ignore[attr-defined]
+    stream.config._log.access.assert_not_called()
+
+
+@pytest.mark.asyncio
 async def test_handle_body_memoryview(stream: HTTPStream) -> None:
     await stream.handle(Body(stream_id=1, data=memoryview(b"data")))  # type: ignore[arg-type]
     stream.app_put.assert_called()  # type: ignore
@@ -134,6 +147,20 @@ async def test_handle_end_body(stream: HTTPStream) -> None:
     assert stream.app_put.call_args_list == [
         call({"type": "http.request", "body": b"", "more_body": False})
     ]
+
+
+@pytest.mark.asyncio
+async def test_handle_closed_before_request_does_not_log_or_disconnect() -> None:
+    stream = HTTPStream(
+        AsyncMock(), Config(), WorkerContext(None), AsyncMock(), False, None, None, AsyncMock(), 1
+    )
+    stream.config._log = AsyncMock(spec=Logger)
+
+    await stream.handle(StreamClosed(stream_id=1))
+
+    assert stream.closed
+    stream.send.assert_not_called()  # type: ignore[attr-defined]
+    stream.config._log.access.assert_not_called()
 
 
 @pytest.mark.asyncio
