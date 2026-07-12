@@ -19,7 +19,7 @@ from .events import (
     StreamClosed,
     Trailers,
 )
-from .h2_send import BUFFER_HIGH_WATER, BufferCompleteError, H2SendScheduler, StreamBuffer
+from .h2_send import BufferCompleteError, H2SendScheduler
 from .http_stream import HTTPStream
 from .queued_stream import QueuedStream
 from .ws_stream import WSStream

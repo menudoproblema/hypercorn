@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from typing import Any
 from unittest.mock import AsyncMock, Mock
 
 import pytest
@@ -87,7 +88,9 @@ async def test_close_aborts_transport_on_wait_closed_timeout() -> None:
 
 
 @pytest.mark.asyncio
-async def test_read_data_without_timeout_does_not_use_wait_for(monkeypatch) -> None:
+async def test_read_data_without_timeout_does_not_use_wait_for(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     event_loop: asyncio.AbstractEventLoop = asyncio.get_running_loop()
     config = Config()
     config.read_timeout = None
@@ -105,7 +108,7 @@ async def test_read_data_without_timeout_does_not_use_wait_for(monkeypatch) -> N
     server.protocol = Mock()
     server.protocol.handle = AsyncMock()
 
-    async def forbidden_wait_for(*args, **kwargs):
+    async def forbidden_wait_for(*args: Any, **kwargs: Any) -> None:
         raise AssertionError("asyncio.wait_for should not be used when read_timeout is None")
 
     monkeypatch.setattr(asyncio, "wait_for", forbidden_wait_for)

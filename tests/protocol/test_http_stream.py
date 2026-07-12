@@ -29,7 +29,7 @@ from hypercorn.typing import (
 from hypercorn.utils import UnexpectedMessageError
 
 
-@pytest_asyncio.fixture(name="stream")  # type: ignore[misc]
+@pytest_asyncio.fixture(name="stream")
 async def _stream() -> HTTPStream:
     stream = HTTPStream(
         AsyncMock(), Config(), WorkerContext(None), AsyncMock(), False, None, None, AsyncMock(), 1
@@ -228,7 +228,7 @@ async def test_send_response_reuses_bytes_body(stream: HTTPStream) -> None:
     body = b"Body"
     await stream.app_send(cast(HTTPResponseBodyEvent, {"type": "http.response.body", "body": body}))
 
-    sent_body = stream.send.call_args_list[1].args[0]
+    sent_body = cast(AsyncMock, stream.send).call_args_list[1].args[0]
     assert isinstance(sent_body, Body)
     assert sent_body.data is body
 
@@ -249,10 +249,10 @@ async def test_send_response_copies_non_bytes_body(stream: HTTPStream) -> None:
         cast(HTTPResponseStartEvent, {"type": "http.response.start", "status": 200, "headers": []})
     )
     await stream.app_send(
-        cast(HTTPResponseBodyEvent, {"type": "http.response.body", "body": memoryview(b"Body")})  # type: ignore[arg-type]
+        cast(HTTPResponseBodyEvent, {"type": "http.response.body", "body": memoryview(b"Body")})
     )
 
-    sent_body = stream.send.call_args_list[1].args[0]
+    sent_body = cast(AsyncMock, stream.send).call_args_list[1].args[0]
     assert isinstance(sent_body, Body)
     assert sent_body.data == b"Body"
 

@@ -8,6 +8,7 @@ import subprocess
 import sys
 import time
 from pathlib import Path
+from types import TracebackType
 
 from h2.connection import H2Connection
 from h2.events import DataReceived, StreamEnded
@@ -34,7 +35,7 @@ class ServerProcess:
             "--bind",
             f"127.0.0.1:{self.port}",
             "--workers",
-            "1",
+            "0",
             "--worker-class",
             "asyncio",
         ]
@@ -52,7 +53,12 @@ class ServerProcess:
         await wait_for_ready(self.port, tls=self.tls)
         return self
 
-    async def __aexit__(self, exc_type, exc, tb) -> None:
+    async def __aexit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc: BaseException | None,
+        tb: TracebackType | None,
+    ) -> None:
         if self.process is None:
             return
         self.process.terminate()

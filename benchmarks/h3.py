@@ -11,6 +11,7 @@ import sys
 import time
 from dataclasses import asdict, dataclass
 from pathlib import Path
+from types import TracebackType
 
 from aioquic.asyncio.client import connect
 from aioquic.asyncio.protocol import QuicConnectionProtocol
@@ -126,10 +127,12 @@ class QuicServerProcess:
                 sys.executable,
                 "-m",
                 "hypercorn",
+                "--bind",
+                "127.0.0.1:0",
                 "--quic-bind",
                 f"127.0.0.1:{self.port}",
                 "--workers",
-                "1",
+                "0",
                 "--worker-class",
                 "asyncio",
                 "--certfile",
@@ -147,7 +150,12 @@ class QuicServerProcess:
         await wait_for_ready(self.port)
         return self
 
-    async def __aexit__(self, exc_type, exc, tb) -> None:
+    async def __aexit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc: BaseException | None,
+        tb: TracebackType | None,
+    ) -> None:
         if self.process is None:
             return
         self.process.terminate()

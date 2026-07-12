@@ -8,14 +8,16 @@ from typing import Protocol
 from ..typing import Event as IOEvent
 
 MAX_BATCHED_SENDS = 32
+MAX_PENDING_SENDS = 64
+MAX_PENDING_BYTES = 32 * 1024
 
 
 class H3Connection(Protocol):
-    def send_headers(
+    def send_headers(  # noqa: E704
         self, stream_id: int, headers: list[tuple[bytes, bytes]], end_stream: bool = False
     ) -> None: ...
 
-    def send_data(self, stream_id: int, data: bytes, end_stream: bool) -> None: ...
+    def send_data(self, stream_id: int, data: bytes, end_stream: bool) -> None: ...  # noqa: E704
 
 
 class H3SendClosedError(RuntimeError):
@@ -26,6 +28,7 @@ class H3SendClosedError(RuntimeError):
 class _QueuedOperation:
     apply: Callable[[], bool]
     complete: IOEvent
+    size: int
     error: Exception | None = None
 
 
@@ -41,6 +44,9 @@ class H3SendScheduler:
         self.has_data = event_class()
         self._event_class = event_class
         self._closed = False
+        self._error: Exception | None = None
+        self._pending: deque[_QueuedOperation] = deque()
+        self._pending_bytes = 0
         self._queue: deque[_QueuedOperation] = deque()
 
     async def run(self, should_stop: Callable[[], bool]) -> None:
@@ -56,14 +62,27 @@ class H3SendScheduler:
                     break
 
             await self._send_ready_batch()
+            if self._error is not None:
+                await self._fail_pending(self._error)
+                break
 
     async def headers(
         self, stream_id: int, headers: list[tuple[bytes, bytes]], end_stream: bool = False
     ) -> None:
-        await self._enqueue(lambda: self._send_headers(stream_id, headers, end_stream=end_stream))
+        queued_headers = list(headers)
+        size = sum(len(name) + len(value) for name, value in queued_headers)
+        await self._enqueue(
+            lambda: self._send_headers(stream_id, queued_headers, end_stream=end_stream),
+            size,
+            wait_for_completion=end_stream,
+        )
 
     async def data(self, stream_id: int, data: bytes, end_stream: bool = False) -> None:
-        await self._enqueue(lambda: self._send_data(stream_id, data, end_stream=end_stream))
+        await self._enqueue(
+            lambda: self._send_data(stream_id, data, end_stream=end_stream),
+            len(data),
+            wait_for_completion=end_stream,
+        )
 
     async def wake(self) -> None:
         await self.has_data.set()
@@ -73,21 +92,42 @@ class H3SendScheduler:
         await self._fail_pending(H3SendClosedError("H3 send scheduler is closed"))
         await self.has_data.set()
 
-    async def _enqueue(self, apply: Callable[[], bool]) -> None:
+    async def _enqueue(
+        self, apply: Callable[[], bool], size: int, *, wait_for_completion: bool
+    ) -> None:
         if self._closed:
             raise H3SendClosedError("H3 send scheduler is closed")
-        operation = _QueuedOperation(apply=apply, complete=self._event_class())
+        if self._error is not None:
+            raise self._error
+
+        while self._pending and (
+            len(self._pending) >= MAX_PENDING_SENDS
+            or self._pending_bytes + size > MAX_PENDING_BYTES
+        ):
+            oldest = self._pending[0]
+            await oldest.complete.wait()
+            if oldest.error is not None:
+                raise oldest.error
+            if self._error is not None:
+                raise self._error
+            if self._closed:
+                raise H3SendClosedError("H3 send scheduler is closed")
+
+        operation = _QueuedOperation(apply=apply, complete=self._event_class(), size=size)
         self._queue.append(operation)
+        self._pending.append(operation)
+        self._pending_bytes += size
         await self.has_data.set()
-        await operation.complete.wait()
-        if operation.error is not None:
-            raise operation.error
+        if wait_for_completion:
+            await operation.complete.wait()
+            if operation.error is not None:
+                raise operation.error
 
     async def _fail_pending(self, error: Exception) -> None:
         while self._queue:
             operation = self._queue.popleft()
             operation.error = error
-            await operation.complete.set()
+            await self._complete(operation)
 
     async def _send_ready_batch(self) -> None:
         needs_flush = False
@@ -102,14 +142,24 @@ class H3SendScheduler:
             if needs_flush:
                 await self.flush()
         except Exception as error:
+            self._error = error
             for operation in processed:
                 operation.error = error
         finally:
             for operation in processed:
-                await operation.complete.set()
+                await self._complete(operation)
 
-        if self._queue:
+        if self._queue and self._error is None:
             await self.has_data.set()
+
+    async def _complete(self, operation: _QueuedOperation) -> None:
+        try:
+            self._pending.remove(operation)
+        except ValueError:
+            pass
+        else:
+            self._pending_bytes -= operation.size
+        await operation.complete.set()
 
     def _send_headers(
         self, stream_id: int, headers: list[tuple[bytes, bytes]], end_stream: bool = False

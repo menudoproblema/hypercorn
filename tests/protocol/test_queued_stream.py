@@ -1,19 +1,27 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Callable, Coroutine
+from typing import Any, cast
 
 import pytest
 
-from hypercorn.asyncio.worker_context import EventWrapper, WorkerContext
+from hypercorn.asyncio.worker_context import WorkerContext
 from hypercorn.protocol.events import Body, EndBody, StreamClosed
-from hypercorn.protocol.queued_stream import _merge_queued_events, _QueuedEvent, QueuedStream
+from hypercorn.protocol.queued_stream import (
+    _merge_queued_events,
+    _QueuedEvent,
+    QueuedStream,
+    Stream,
+)
+from hypercorn.typing import TaskGroup
 
 
 class DummyTaskGroup:
     def __init__(self) -> None:
         self.tasks: list[asyncio.Task] = []
 
-    def spawn(self, func, *args) -> None:
+    def spawn(self, func: Callable[..., Coroutine[Any, Any, None]], *args: Any) -> None:
         self.tasks.append(asyncio.create_task(func(*args)))
 
     async def aclose(self) -> None:
@@ -39,7 +47,12 @@ async def test_queued_stream_backpressure_blocks_until_queue_has_space() -> None
 
     task_group = DummyTaskGroup()
     stream = BlockingStream()
-    queued = QueuedStream(stream, task_group, WorkerContext(None), max_queue_size=1)
+    queued = QueuedStream(
+        cast(Stream, stream),
+        cast(TaskGroup, task_group),
+        WorkerContext(None),
+        max_queue_size=1,
+    )
 
     await queued.handle(Body(stream_id=1, data=b"one"))
     await asyncio.wait_for(stream.started.wait(), timeout=0.1)
@@ -72,7 +85,12 @@ async def test_queued_stream_zero_max_queue_size_is_unbounded() -> None:
 
     task_group = DummyTaskGroup()
     stream = RecordingStream()
-    queued = QueuedStream(stream, task_group, WorkerContext(None), max_queue_size=0)
+    queued = QueuedStream(
+        cast(Stream, stream),
+        cast(TaskGroup, task_group),
+        WorkerContext(None),
+        max_queue_size=0,
+    )
 
     await queued.handle(Body(stream_id=1, data=b"one"))
     await queued.handle(Body(stream_id=1, data=b"two"))
@@ -100,8 +118,8 @@ async def test_queued_stream_allows_oversized_first_event() -> None:
     task_group = DummyTaskGroup()
     stream = BlockingStream()
     queued = QueuedStream(
-        stream,
-        task_group,
+        cast(Stream, stream),
+        cast(TaskGroup, task_group),
         WorkerContext(None),
         max_queue_size=1,
         max_queue_bytes=4,
@@ -138,7 +156,12 @@ async def test_queued_stream_coalesces_consecutive_body_events() -> None:
 
     task_group = DummyTaskGroup()
     stream = RecordingStream()
-    queued = QueuedStream(stream, task_group, WorkerContext(None), max_queue_size=1)
+    queued = QueuedStream(
+        cast(Stream, stream),
+        cast(TaskGroup, task_group),
+        WorkerContext(None),
+        max_queue_size=1,
+    )
 
     await queued.handle(Body(stream_id=1, data=b"one"))
     await asyncio.wait_for(stream.started.wait(), timeout=0.1)
@@ -180,7 +203,12 @@ async def test_queued_stream_retains_chunks_until_dispatch() -> None:
 
     task_group = DummyTaskGroup()
     stream = RecordingStream()
-    queued = QueuedStream(stream, task_group, WorkerContext(None), max_queue_size=1)
+    queued = QueuedStream(
+        cast(Stream, stream),
+        cast(TaskGroup, task_group),
+        WorkerContext(None),
+        max_queue_size=1,
+    )
 
     await queued.handle(Body(stream_id=1, data=b"one"))
     await asyncio.wait_for(stream.started.wait(), timeout=0.1)

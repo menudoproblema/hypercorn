@@ -150,6 +150,7 @@ async def _round_trip(
     writer.write(client.send(wsproto.events.BytesMessage(data=payload)))
     await writer.drain()
 
+    received = 0
     while True:
         data = await asyncio.wait_for(reader.read(65535), timeout=5)
         if data == b"":
@@ -157,7 +158,13 @@ async def _round_trip(
         client.receive_data(data)
         for event in client.events():
             if isinstance(event, wsproto.events.BytesMessage):
-                return (time.perf_counter() - start) * 1000
+                received += len(event.data)
+                if event.message_finished:
+                    if received != len(payload):
+                        raise RuntimeError(
+                            f"Websocket echo size mismatch: expected {len(payload)}, got {received}"
+                        )
+                    return (time.perf_counter() - start) * 1000
 
 
 if __name__ == "__main__":

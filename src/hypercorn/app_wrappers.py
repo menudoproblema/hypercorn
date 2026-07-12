@@ -95,7 +95,7 @@ class WSGIWrapper:
             response_headers: list[tuple[str, str]],
             exc_info: tuple[type[BaseException], BaseException, TracebackType] | None = None,
         ) -> None:
-            nonlocal headers, response_started, status_code, headers_sent
+            nonlocal headers, response_started, status_code
 
             if response_started and exc_info is None:
                 raise RuntimeError(

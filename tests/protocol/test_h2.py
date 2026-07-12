@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Callable, Coroutine
+from typing import Any, cast
 from unittest.mock import AsyncMock, call, Mock
 
 import pytest
@@ -12,21 +14,26 @@ from hypercorn.asyncio.worker_context import EventWrapper, WorkerContext
 from hypercorn.config import Config
 from hypercorn.events import Closed, RawData
 from hypercorn.protocol.events import Body, StreamClosed
-from hypercorn.protocol.h2 import BUFFER_HIGH_WATER, BufferCompleteError, H2Protocol, StreamBuffer
-from hypercorn.protocol.h2_send import H2SendScheduler
-from hypercorn.protocol.queued_stream import QueuedStream
+from hypercorn.protocol.h2 import H2Protocol
+from hypercorn.protocol.h2_send import (
+    BUFFER_HIGH_WATER,
+    BufferCompleteError,
+    H2SendScheduler,
+    StreamBuffer,
+)
+from hypercorn.protocol.queued_stream import QueuedStream, Stream
 from hypercorn.trio.worker_context import EventWrapper as TrioEventWrapper
-from hypercorn.typing import ConnectionState
+from hypercorn.typing import ConnectionState, TaskGroup
 
 
 class DummyTaskGroup:
     def __init__(self) -> None:
         self.tasks: list[asyncio.Task] = []
 
-    def spawn(self, func, *args) -> None:
+    def spawn(self, func: Callable[..., Coroutine[Any, Any, None]], *args: Any) -> None:
         self.tasks.append(asyncio.create_task(func(*args)))
 
-    async def spawn_app(self, *args, **kwargs) -> AsyncMock:
+    async def spawn_app(self, *args: Any, **kwargs: Any) -> AsyncMock:
         return AsyncMock()
 
     async def aclose(self) -> None:
@@ -429,8 +436,12 @@ async def test_protocol_does_not_block_other_streams_on_slow_stream() -> None:
 
     slow_stream = BlockingStream()
     fast_stream = RecordingStream()
-    protocol.streams[1] = QueuedStream(slow_stream, task_group, protocol.context)  # type: ignore[arg-type]
-    protocol.streams[3] = QueuedStream(fast_stream, task_group, protocol.context)  # type: ignore[arg-type]
+    protocol.streams[1] = QueuedStream(
+        cast(Stream, slow_stream), cast(TaskGroup, task_group), protocol.context
+    )
+    protocol.streams[3] = QueuedStream(
+        cast(Stream, fast_stream), cast(TaskGroup, task_group), protocol.context
+    )
 
     await protocol._handle_events(
         [

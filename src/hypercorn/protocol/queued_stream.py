@@ -11,9 +11,9 @@ from ..typing import TaskGroup, WorkerContext
 
 class Stream(Protocol):
     @property
-    def idle(self) -> bool: ...
+    def idle(self) -> bool: ...  # noqa: E704
 
-    async def handle(self, event: Event) -> None: ...
+    async def handle(self, event: Event) -> None: ...  # noqa: E704
 
 
 @dataclass

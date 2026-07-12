@@ -35,7 +35,11 @@ from hypercorn.utils import UnexpectedMessageError
 def test_buffer() -> None:
     buffer_ = WebsocketBuffer(10)
     buffer_.extend(TextMessage(data="abc", frame_finished=False, message_finished=True))
-    assert buffer_.to_message() == {"type": "websocket.receive", "bytes": None, "text": "abc"}
+    assert cast(Any, buffer_.to_message()) == {
+        "type": "websocket.receive",
+        "bytes": None,
+        "text": "abc",
+    }
     buffer_.clear()
     buffer_.extend(BytesMessage(data=b"abc", frame_finished=False, message_finished=True))
     assert buffer_.to_message() == {"type": "websocket.receive", "bytes": b"abc", "text": None}
@@ -158,7 +162,7 @@ def test_handshake_accept_additional_headers() -> None:
     ]
 
 
-@pytest_asyncio.fixture(name="stream")  # type: ignore[misc]
+@pytest_asyncio.fixture(name="stream")
 async def _stream() -> WSStream:
     stream = WSStream(
         AsyncMock(), Config(), WorkerContext(None), AsyncMock(), False, None, None, AsyncMock(), 1
@@ -536,7 +540,7 @@ async def test_send_connection_reuses_bytes_payload(stream: WSStream) -> None:
 
     await stream.app_send(cast(WebsocketSendEvent, {"type": "websocket.send", "bytes": payload}))
 
-    event = stream._send_wsproto_event.await_args.args[0]  # type: ignore[attr-defined]
+    event = stream._send_wsproto_event.await_args.args[0]
     assert isinstance(event, BytesMessage)
     assert event.data is payload
 
