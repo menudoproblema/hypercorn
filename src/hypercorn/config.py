@@ -116,9 +116,10 @@ class Config:
     workers = 1
     wsgi_max_body_size = 16 * 1024 * 1024 * BYTES
     _date_header_cache: tuple[int, tuple[bytes, bytes]] | None = None
-    _response_headers_cache: dict[
-        tuple[str, bool, tuple[str, ...], tuple[tuple, ...]], tuple[tuple[bytes, bytes], ...]
-    ] | None = None
+    _response_headers_cache: (
+        dict[tuple[str, bool, tuple[str, ...], tuple[tuple, ...]], tuple[tuple[bytes, bytes], ...]]
+        | None
+    ) = None
 
     def set_cert_reqs(self, value: int) -> None:
         warnings.warn("Please use verify_mode instead", Warning)

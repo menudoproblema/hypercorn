@@ -8,11 +8,11 @@ import pytest
 from hypercorn.app_wrappers import ASGIWrapper
 from hypercorn.typing import Scope
 from hypercorn.utils import (
-    NoAppError,
     build_and_validate_headers,
     filter_pseudo_headers,
     is_asgi,
     load_application,
+    NoAppError,
     suppress_body,
 )
 

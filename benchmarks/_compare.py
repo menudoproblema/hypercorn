@@ -140,9 +140,11 @@ def build_comparison_result(
     if throughput_field is not None:
         current_value = getattr(current, throughput_field)
         baseline_value = getattr(baseline, throughput_field)
-        payload[throughput_delta_field or f"delta_{throughput_field}"] = current_value - baseline_value
-        payload[throughput_improvement_field or f"improvement_{throughput_field}_percent"] = percentage_growth(
-            current_value, baseline_value
+        payload[throughput_delta_field or f"delta_{throughput_field}"] = (
+            current_value - baseline_value
+        )
+        payload[throughput_improvement_field or f"improvement_{throughput_field}_percent"] = (
+            percentage_growth(current_value, baseline_value)
         )
     return payload
 

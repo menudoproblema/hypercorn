@@ -11,7 +11,7 @@ from pathlib import Path
 from h2.connection import H2Connection
 from h2.events import DataReceived, ResponseReceived, StreamEnded
 
-from benchmarks._runtime import PROJECT_ROOT, ServerProcess, build_ssl_context, percentile
+from benchmarks._runtime import build_ssl_context, percentile, PROJECT_ROOT, ServerProcess
 
 
 @dataclass
@@ -68,8 +68,12 @@ async def main() -> int:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Run a small HTTP/2 HoL benchmark against Hypercorn.")
-    parser.add_argument("--server-repo", default=str(PROJECT_ROOT), help="Path to the Hypercorn repo to benchmark.")
+    parser = argparse.ArgumentParser(
+        description="Run a small HTTP/2 HoL benchmark against Hypercorn."
+    )
+    parser.add_argument(
+        "--server-repo", default=str(PROJECT_ROOT), help="Path to the Hypercorn repo to benchmark."
+    )
     parser.add_argument("--label", default="local", help="Label to include in the output.")
     parser.add_argument("--warmup-iterations", type=int, default=2)
     parser.add_argument("--measured-iterations", type=int, default=10)
@@ -180,6 +184,7 @@ def send_hol_workload(
             end_stream=False,
         )
         conn.send_data(stream_id, b"ok", end_stream=True)
+
 
 if __name__ == "__main__":
     raise SystemExit(asyncio.run(main()))

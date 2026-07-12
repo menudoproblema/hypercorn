@@ -6,10 +6,10 @@ import statistics
 from pathlib import Path
 
 from benchmarks._compare import (
-    PROJECT_ROOT,
     build_comparison_result,
     create_worktree,
     methodology_name,
+    PROJECT_ROOT,
     run_interleaved_async,
     summarize_dataclass_runs,
     write_json_output,
@@ -55,7 +55,9 @@ async def main() -> int:
         current_runs,
         extra_fields={
             "total_time_s": lambda runs: statistics.median(run.total_time_s for run in runs),
-            "requests_per_second": lambda runs: statistics.median(run.requests_per_second for run in runs),
+            "requests_per_second": lambda runs: statistics.median(
+                run.requests_per_second for run in runs
+            ),
         },
     )
     baseline = summarize_dataclass_runs(
@@ -63,7 +65,9 @@ async def main() -> int:
         baseline_runs,
         extra_fields={
             "total_time_s": lambda runs: statistics.median(run.total_time_s for run in runs),
-            "requests_per_second": lambda runs: statistics.median(run.requests_per_second for run in runs),
+            "requests_per_second": lambda runs: statistics.median(
+                run.requests_per_second for run in runs
+            ),
         },
     )
     payload = {
@@ -83,7 +87,9 @@ async def main() -> int:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Compare local Hypercorn against upstream in a real HTTP/3 benchmark.")
+    parser = argparse.ArgumentParser(
+        description="Compare local Hypercorn against upstream in a real HTTP/3 benchmark."
+    )
     parser.add_argument("--baseline-ref", default="upstream/main")
     parser.add_argument("--baseline-path")
     parser.add_argument("--no-fetch", action="store_true")
@@ -92,7 +98,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--total-requests", type=int, default=500)
     parser.add_argument("--warmup-requests", type=int, default=50)
     parser.add_argument("--runs", type=int, default=3)
-    parser.add_argument("--sequential", action="store_true", help="Run all current runs and then all baseline runs.")
+    parser.add_argument(
+        "--sequential", action="store_true", help="Run all current runs and then all baseline runs."
+    )
     parser.add_argument("--output-json")
     return parser
 

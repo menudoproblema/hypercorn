@@ -11,7 +11,7 @@ from pathlib import Path
 import wsproto
 import wsproto.events
 
-from benchmarks._runtime import PROJECT_ROOT, ServerProcess, build_ssl_context, percentile
+from benchmarks._runtime import build_ssl_context, percentile, PROJECT_ROOT, ServerProcess
 
 
 @dataclass
@@ -64,7 +64,9 @@ async def main() -> int:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Run a small websocket echo benchmark against Hypercorn.")
+    parser = argparse.ArgumentParser(
+        description="Run a small websocket echo benchmark against Hypercorn."
+    )
     parser.add_argument("--server-repo", default=str(PROJECT_ROOT))
     parser.add_argument("--label", default="local")
     parser.add_argument("--tls", action="store_true")

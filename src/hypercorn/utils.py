@@ -84,7 +84,9 @@ def _resolve_application(module: Any, app_name: str, path: str) -> Any:
         try:
             app = getattr(app, attribute)
         except AttributeError as error:
-            raise NoAppError(f"Cannot load application from '{path}', application not found.") from error
+            raise NoAppError(
+                f"Cannot load application from '{path}', application not found."
+            ) from error
     return app
 
 

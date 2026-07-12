@@ -6,7 +6,7 @@ import pytest
 
 from hypercorn.asyncio.worker_context import EventWrapper, WorkerContext
 from hypercorn.protocol.events import Body, EndBody, StreamClosed
-from hypercorn.protocol.queued_stream import QueuedStream, _QueuedEvent, _merge_queued_events
+from hypercorn.protocol.queued_stream import _merge_queued_events, _QueuedEvent, QueuedStream
 
 
 class DummyTaskGroup:
@@ -144,7 +144,9 @@ async def test_queued_stream_coalesces_consecutive_body_events() -> None:
     await asyncio.wait_for(stream.started.wait(), timeout=0.1)
 
     await queued.handle(Body(stream_id=1, data=b"two"), lambda: callback("two"))
-    task = asyncio.create_task(queued.handle(Body(stream_id=1, data=b"three"), lambda: callback("three")))
+    task = asyncio.create_task(
+        queued.handle(Body(stream_id=1, data=b"three"), lambda: callback("three"))
+    )
     await asyncio.sleep(0)
     assert task.done()
 

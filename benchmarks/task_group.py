@@ -8,7 +8,7 @@ import time
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
-from benchmarks._runtime import PROJECT_ROOT, percentile
+from benchmarks._runtime import percentile, PROJECT_ROOT
 from hypercorn.app_wrappers import ASGIWrapper, WSGIWrapper
 from hypercorn.asyncio.task_group import TaskGroup
 from hypercorn.config import Config
@@ -135,6 +135,7 @@ class _TaskGroupBenchmark:
 
     async def _asgi_app(self, scope, receive, send) -> None:
         await receive()
+
 
 if __name__ == "__main__":
     raise SystemExit(asyncio.run(main()))

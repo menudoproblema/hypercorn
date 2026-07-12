@@ -4,7 +4,7 @@ import os
 import socket
 import ssl
 import sys
-from unittest.mock import Mock, NonCallableMock, call
+from unittest.mock import call, Mock, NonCallableMock
 
 import pytest
 from _pytest.monkeypatch import MonkeyPatch

@@ -112,9 +112,8 @@ class QueuedStream:
             while self._queue:
                 queued = self._queue.popleft()
                 self._queued_bytes -= queued.size_bytes
-                if (
-                    (self._max_queue_size > 0 and len(self._queue) < self._max_queue_size)
-                    or (self._max_queue_bytes > 0 and self._queued_bytes < self._max_queue_bytes)
+                if (self._max_queue_size > 0 and len(self._queue) < self._max_queue_size) or (
+                    self._max_queue_bytes > 0 and self._queued_bytes < self._max_queue_bytes
                 ):
                     await self._has_space.set()
                 if len(self._queue) == 0:

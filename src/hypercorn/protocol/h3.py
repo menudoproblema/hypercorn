@@ -20,8 +20,8 @@ from .events import (
     StreamClosed,
     Trailers,
 )
-from .http_stream import HTTPStream
 from .h3_send import H3SendScheduler
+from .http_stream import HTTPStream
 from .queued_stream import QueuedStream
 from .ws_stream import WSStream
 from ..config import Config

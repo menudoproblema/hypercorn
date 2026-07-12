@@ -11,7 +11,7 @@ from pathlib import Path
 from h2.connection import H2Connection
 from h2.events import DataReceived, ResponseReceived, StreamEnded
 
-from benchmarks._runtime import PROJECT_ROOT, ServerProcess, build_ssl_context, percentile
+from benchmarks._runtime import build_ssl_context, percentile, PROJECT_ROOT, ServerProcess
 
 
 @dataclass
@@ -103,9 +103,7 @@ async def run_fragmented_body_benchmark(
     )
 
 
-async def run_fragmented_body_iteration(
-    port: int, config: FragmentedBodyBenchmarkConfig
-) -> float:
+async def run_fragmented_body_iteration(port: int, config: FragmentedBodyBenchmarkConfig) -> float:
     reader, writer = await asyncio.open_connection(
         "127.0.0.1",
         port,

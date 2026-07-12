@@ -291,7 +291,9 @@ async def test_handle_remote_close_sends_end_data_before_stream_closed(stream: W
     stream.send.reset_mock()  # type: ignore[attr-defined]
 
     client = wsproto.connection.Connection(wsproto.ConnectionType.CLIENT)
-    await stream.handle(Data(stream_id=1, data=client.send(wsproto.events.CloseConnection(code=1000))))
+    await stream.handle(
+        Data(stream_id=1, data=client.send(wsproto.events.CloseConnection(code=1000)))
+    )
 
     assert stream.send.call_args_list == [  # type: ignore
         call(Data(stream_id=1, data=b"\x88\x02\x03\xe8")),

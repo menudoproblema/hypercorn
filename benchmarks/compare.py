@@ -5,10 +5,10 @@ import asyncio
 from pathlib import Path
 
 from benchmarks._compare import (
-    PROJECT_ROOT,
     build_comparison_result,
     create_worktree,
     methodology_name,
+    PROJECT_ROOT,
     run_interleaved_async,
     summarize_dataclass_runs,
     write_json_output,
@@ -63,9 +63,14 @@ async def main() -> int:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Compare local Hypercorn against upstream for the H2 HoL benchmark.")
+    parser = argparse.ArgumentParser(
+        description="Compare local Hypercorn against upstream for the H2 HoL benchmark."
+    )
     parser.add_argument("--baseline-ref", default="upstream/main")
-    parser.add_argument("--baseline-path", help="Optional existing repo path to use as baseline instead of creating a worktree.")
+    parser.add_argument(
+        "--baseline-path",
+        help="Optional existing repo path to use as baseline instead of creating a worktree.",
+    )
     parser.add_argument("--no-fetch", action="store_true")
     parser.add_argument("--warmup-iterations", type=int, default=2)
     parser.add_argument("--measured-iterations", type=int, default=10)
@@ -74,7 +79,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--slow-chunk-size", type=int, default=4096)
     parser.add_argument("--slow-delay-ms", type=int, default=25)
     parser.add_argument("--runs", type=int, default=1)
-    parser.add_argument("--sequential", action="store_true", help="Run all current runs and then all baseline runs.")
+    parser.add_argument(
+        "--sequential", action="store_true", help="Run all current runs and then all baseline runs."
+    )
     parser.add_argument("--output-json")
     return parser
 

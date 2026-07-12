@@ -5,10 +5,10 @@ import asyncio
 from pathlib import Path
 
 from benchmarks._compare import (
-    PROJECT_ROOT,
     build_comparison_result,
     create_worktree,
     methodology_name,
+    PROJECT_ROOT,
     run_interleaved_async,
     summarize_dataclass_runs,
     write_json_output,
@@ -79,7 +79,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--chunk-size", type=int, default=128)
     parser.add_argument("--delay-ms", type=int, default=1)
     parser.add_argument("--runs", type=int, default=1)
-    parser.add_argument("--sequential", action="store_true", help="Run all current runs and then all baseline runs.")
+    parser.add_argument(
+        "--sequential", action="store_true", help="Run all current runs and then all baseline runs."
+    )
     parser.add_argument("--output-json")
     return parser
 

@@ -6,15 +6,15 @@ import statistics
 from pathlib import Path
 
 from benchmarks._compare import (
-    PROJECT_ROOT,
     build_comparison_result,
     create_worktree,
     methodology_name,
+    PROJECT_ROOT,
     run_interleaved_async,
     summarize_dataclass_runs,
     write_json_output,
 )
-from benchmarks.ws import WebsocketBenchmarkConfig, run_ws_benchmark
+from benchmarks.ws import run_ws_benchmark, WebsocketBenchmarkConfig
 
 
 async def main() -> int:
@@ -56,7 +56,9 @@ async def main() -> int:
         current_runs,
         extra_fields={
             "total_time_s": lambda runs: statistics.median(run.total_time_s for run in runs),
-            "messages_per_second": lambda runs: statistics.median(run.messages_per_second for run in runs),
+            "messages_per_second": lambda runs: statistics.median(
+                run.messages_per_second for run in runs
+            ),
         },
     )
     baseline = summarize_dataclass_runs(
@@ -64,7 +66,9 @@ async def main() -> int:
         baseline_runs,
         extra_fields={
             "total_time_s": lambda runs: statistics.median(run.total_time_s for run in runs),
-            "messages_per_second": lambda runs: statistics.median(run.messages_per_second for run in runs),
+            "messages_per_second": lambda runs: statistics.median(
+                run.messages_per_second for run in runs
+            ),
         },
     )
     payload = {
@@ -84,7 +88,9 @@ async def main() -> int:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Compare local Hypercorn against upstream in websocket echo benchmarks.")
+    parser = argparse.ArgumentParser(
+        description="Compare local Hypercorn against upstream in websocket echo benchmarks."
+    )
     parser.add_argument("--baseline-ref", default="upstream/main")
     parser.add_argument("--baseline-path")
     parser.add_argument("--no-fetch", action="store_true")
@@ -94,7 +100,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--measured-messages", type=int, default=300)
     parser.add_argument("--payload-size", type=int, default=65536)
     parser.add_argument("--runs", type=int, default=1)
-    parser.add_argument("--sequential", action="store_true", help="Run all current runs and then all baseline runs.")
+    parser.add_argument(
+        "--sequential", action="store_true", help="Run all current runs and then all baseline runs."
+    )
     parser.add_argument("--output-json")
     return parser
 

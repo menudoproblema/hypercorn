@@ -10,7 +10,7 @@ from pathlib import Path
 
 import httpx
 
-from benchmarks._runtime import PROJECT_ROOT, ServerProcess, percentile
+from benchmarks._runtime import percentile, PROJECT_ROOT, ServerProcess
 
 
 @dataclass
@@ -70,7 +70,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--server-repo", default=str(PROJECT_ROOT))
     parser.add_argument("--label", default="local")
     parser.add_argument("--http-version", choices=["1.1", "2"], default="1.1")
-    parser.add_argument("--tls", action="store_true", help="Use TLS for HTTP/1.1 runs. HTTP/2 always uses TLS.")
+    parser.add_argument(
+        "--tls", action="store_true", help="Use TLS for HTTP/1.1 runs. HTTP/2 always uses TLS."
+    )
     parser.add_argument("--path", default="/fast")
     parser.add_argument("--concurrency", type=int, default=50)
     parser.add_argument("--total-requests", type=int, default=500)
@@ -150,6 +152,7 @@ async def run_requests(
         timeout=10.0,
         limits=limits,
     ) as client:
+
         async def worker() -> None:
             while True:
                 item = await queue.get()

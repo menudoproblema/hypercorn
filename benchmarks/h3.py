@@ -19,7 +19,7 @@ from aioquic.h3.events import DataReceived, HeadersReceived
 from aioquic.quic.configuration import QuicConfiguration
 from aioquic.quic.events import ConnectionTerminated, QuicEvent
 
-from benchmarks._runtime import CERTFILE, KEYFILE, PROJECT_ROOT, percentile, reserve_udp_port
+from benchmarks._runtime import CERTFILE, KEYFILE, percentile, PROJECT_ROOT, reserve_udp_port
 
 
 @dataclass
@@ -80,9 +80,16 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-async def run_h3_benchmark(server_repo: Path, label: str, config: H3BenchmarkConfig) -> H3BenchmarkResult:
+async def run_h3_benchmark(
+    server_repo: Path, label: str, config: H3BenchmarkConfig
+) -> H3BenchmarkResult:
     async with QuicServerProcess(server_repo) as server:
-        await run_requests(server.port, "/ready", min(config.warmup_requests, config.total_requests), max(1, min(config.concurrency, config.warmup_requests or config.total_requests)))
+        await run_requests(
+            server.port,
+            "/ready",
+            min(config.warmup_requests, config.total_requests),
+            max(1, min(config.concurrency, config.warmup_requests or config.total_requests)),
+        )
         total_time_s, samples_ms = await run_requests(
             server.port, config.path, config.total_requests, config.concurrency
         )
@@ -218,7 +225,9 @@ async def wait_for_ready(port: int) -> None:
     raise RuntimeError(f"Timed out waiting for HTTP/3 benchmark server on port {port}")
 
 
-async def run_requests(port: int, path: str, total_requests: int, concurrency: int) -> tuple[float, list[float]]:
+async def run_requests(
+    port: int, path: str, total_requests: int, concurrency: int
+) -> tuple[float, list[float]]:
     if total_requests <= 0:
         return 0.0, []
 
@@ -247,7 +256,9 @@ async def run_requests(port: int, path: str, total_requests: int, concurrency: i
                 start = time.perf_counter()
                 headers, _ = await client.get(path)  # type: ignore[attr-defined]
                 if _status_code(headers) != 200:
-                    raise RuntimeError(f"Unexpected HTTP/3 status for {path}: {_status_code(headers)}")
+                    raise RuntimeError(
+                        f"Unexpected HTTP/3 status for {path}: {_status_code(headers)}"
+                    )
                 elapsed_ms = (time.perf_counter() - start) * 1000
                 async with lock:
                     latencies_ms.append(elapsed_ms)
@@ -280,5 +291,7 @@ def _status_code(headers: list[tuple[bytes, bytes]]) -> int:
         if name == b":status":
             return int(value)
     raise RuntimeError("Missing :status header")
+
+
 if __name__ == "__main__":
     raise SystemExit(asyncio.run(main()))

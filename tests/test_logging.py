@@ -43,7 +43,9 @@ def test_access_logger_init(
         else:
             assert isinstance(logger.access_logger.handlers[0], expected_handler_type)
 
-    assert logger.access_log_atoms == frozenset(re.findall(r"%\(([^)]+)\)s", logger.access_log_format))
+    assert logger.access_log_atoms == frozenset(
+        re.findall(r"%\(([^)]+)\)s", logger.access_log_format)
+    )
 
 
 @pytest.mark.parametrize(
@@ -113,7 +115,9 @@ def test_access_log_environ_atoms(http_scope: HTTPScope, response: ResponseSumma
     assert atoms["{random}e"] == "Environ"
 
 
-def test_access_log_required_atoms_precompute(http_scope: HTTPScope, response: ResponseSummary) -> None:
+def test_access_log_required_atoms_precompute(
+    http_scope: HTTPScope, response: ResponseSummary
+) -> None:
     os.environ["Random"] = "Environ"
     atoms = AccessLogAtoms(http_scope, response, 0, frozenset({"h", "{random}e"}))
     assert atoms["h"] == "127.0.0.1:80"
