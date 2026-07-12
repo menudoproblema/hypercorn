@@ -226,9 +226,7 @@ async def test_send_response_reuses_bytes_body(stream: HTTPStream) -> None:
         cast(HTTPResponseStartEvent, {"type": "http.response.start", "status": 200, "headers": []})
     )
     body = b"Body"
-    await stream.app_send(
-        cast(HTTPResponseBodyEvent, {"type": "http.response.body", "body": body})
-    )
+    await stream.app_send(cast(HTTPResponseBodyEvent, {"type": "http.response.body", "body": body}))
 
     sent_body = stream.send.call_args_list[1].args[0]
     assert isinstance(sent_body, Body)
@@ -349,6 +347,57 @@ async def test_send_trailers(stream: HTTPStream) -> None:
         call(Response(stream_id=1, headers=[], status_code=200)),
         call(Body(stream_id=1, data=b"Body")),
         call(Trailers(stream_id=1, headers=[(b"X", b"V")])),
+        call(EndBody(stream_id=1)),
+        call(StreamClosed(stream_id=1)),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_send_multiple_trailer_messages_as_single_block(stream: HTTPStream) -> None:
+    await stream.handle(
+        Request(
+            stream_id=1,
+            http_version="2",
+            headers=[(b"te", b"trailers")],
+            raw_path=b"/",
+            method="GET",
+            state=ConnectionState({}),
+        )
+    )
+    await stream.app_send(
+        cast(
+            HTTPResponseStartEvent,
+            {"type": "http.response.start", "status": 200, "trailers": True},
+        )
+    )
+    await stream.app_send(cast(HTTPResponseBodyEvent, {"type": "http.response.body"}))
+    await stream.app_send(
+        {
+            "type": "http.response.trailers",
+            "headers": [(b"X-First", b"1")],
+            "more_trailers": True,
+        }
+    )
+
+    assert stream.send.call_args_list == [  # type: ignore
+        call(Response(stream_id=1, headers=[], status_code=200))
+    ]
+
+    await stream.app_send(
+        {
+            "type": "http.response.trailers",
+            "headers": [(b"X-Second", b"2")],
+        }
+    )
+
+    assert stream.send.call_args_list == [  # type: ignore
+        call(Response(stream_id=1, headers=[], status_code=200)),
+        call(
+            Trailers(
+                stream_id=1,
+                headers=[(b"X-First", b"1"), (b"X-Second", b"2")],
+            )
+        ),
         call(EndBody(stream_id=1)),
         call(StreamClosed(stream_id=1)),
     ]

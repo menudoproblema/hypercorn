@@ -18,7 +18,9 @@ from .events import (
 from ..config import Config
 from ..typing import (
     AppWrapper,
+    ASGIReceiveEvent,
     ASGISendEvent,
+    ConnectionState,
     HTTPResponseStartEvent,
     HTTPScope,
     TaskGroup,
@@ -60,7 +62,7 @@ class HTTPStream:
         stream_id: int,
     ) -> None:
         self.app = app
-        self.app_put: Callable[[dict], Awaitable[None]] | None = None
+        self.app_put: Callable[[ASGIReceiveEvent], Awaitable[None]] | None = None
         self.client = client
         self.closed = False
         self.config = config
@@ -74,6 +76,7 @@ class HTTPStream:
         self.state = ASGIHTTPState.REQUEST
         self.stream_id = stream_id
         self.task_group = task_group
+        self.trailer_headers: list[tuple[bytes, bytes]] = []
 
     @property
     def idle(self) -> bool:
@@ -85,7 +88,7 @@ class HTTPStream:
         elif isinstance(event, Request):
             self.start_time = time()
             path, _, query_string = event.raw_path.partition(b"?")
-            self.scope = {
+            scope: HTTPScope = {
                 "type": "http",
                 "http_version": event.http_version,
                 "asgi": {"spec_version": "2.1", "version": "3.0"},
@@ -98,22 +101,23 @@ class HTTPStream:
                 "headers": event.headers,
                 "client": self.client,
                 "server": self.server,
-                "state": event.state.copy(),  # type: ignore[typeddict-item]
+                "state": ConnectionState(event.state.copy()),
                 "extensions": {},
             }
+            self.scope = scope
 
             if event.http_version in TRAILERS_VERSIONS:
-                self.scope["extensions"]["http.response.trailers"] = {}
+                scope["extensions"]["http.response.trailers"] = {}
 
             if event.http_version in PUSH_VERSIONS:
-                self.scope["extensions"]["http.response.push"] = {}
+                scope["extensions"]["http.response.push"] = {}
 
             if event.http_version in EARLY_HINTS_VERSIONS:
-                self.scope["extensions"]["http.response.early_hint"] = {}
+                scope["extensions"]["http.response.early_hint"] = {}
 
             if valid_server_name(self.config, event):
                 self.app_put = await self.task_group.spawn_app(
-                    self.app, self.config, self.scope, self.app_send
+                    self.app, self.config, scope, self.app_send
                 )
             else:
                 await self._send_error_response(404)
@@ -198,9 +202,7 @@ class HTTPStream:
                     body = message.get("body", b"")
                     if not isinstance(body, bytes):
                         body = bytes(body)
-                    await self.send(
-                        Body(stream_id=self.stream_id, data=body)
-                    )
+                    await self.send(Body(stream_id=self.stream_id, data=body))
 
                 if not message.get("more_body", False):
                     if self.response.get("trailers", False):
@@ -241,10 +243,14 @@ class HTTPStream:
                 for name, value in self.scope["headers"]:
                     if name == b"te" and value == b"trailers":
                         headers = build_and_validate_headers(message["headers"])
-                        await self.send(Trailers(stream_id=self.stream_id, headers=headers))
+                        self.trailer_headers.extend(headers)
                         break
 
                 if not message.get("more_trailers", False):
+                    if self.trailer_headers:
+                        await self.send(
+                            Trailers(stream_id=self.stream_id, headers=self.trailer_headers)
+                        )
                     await self._send_closed()
             else:
                 raise UnexpectedMessageError(self.state, message["type"])

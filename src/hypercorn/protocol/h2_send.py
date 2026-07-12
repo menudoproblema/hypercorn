@@ -6,6 +6,7 @@ from collections.abc import Awaitable, Callable
 import h2.events
 import h2.exceptions
 import priority
+from h2.connection import H2Connection
 
 from ..typing import Event as IOEvent
 
@@ -27,6 +28,7 @@ class StreamBuffer:
         "_trailers",
         "_is_empty",
         "_paused",
+        "_finished",
     )
 
     def __init__(self, event_class: type[IOEvent]) -> None:
@@ -37,9 +39,16 @@ class StreamBuffer:
         self._trailers: list[tuple[bytes, bytes]] | None = None
         self._is_empty = event_class()
         self._paused = event_class()
+        self._finished = event_class()
 
     async def drain(self) -> None:
         await self._is_empty.wait()
+
+    async def wait_finished(self) -> None:
+        await self._finished.wait()
+
+    async def finish(self) -> None:
+        await self._finished.set()
 
     def set_complete(self) -> None:
         self._complete = True
@@ -56,6 +65,7 @@ class StreamBuffer:
         self._trailers = None
         await self._is_empty.set()
         await self._paused.set()
+        await self._finished.set()
 
     @property
     def complete(self) -> bool:
@@ -65,7 +75,7 @@ class StreamBuffer:
     def trailers(self) -> list[tuple[bytes, bytes]] | None:
         return self._trailers
 
-    async def push(self, data: bytes) -> None:
+    async def push(self, data: bytes) -> bool:
         if self._complete:
             raise BufferCompleteError()
         chunk = memoryview(data)
@@ -73,14 +83,17 @@ class StreamBuffer:
             self._chunks.append(chunk)
             self._size += len(chunk)
         await self._is_empty.clear()
-        if self._size >= BUFFER_HIGH_WATER:
-            await self._paused.wait()
-            await self._paused.clear()
+        return self._size >= BUFFER_HIGH_WATER
+
+    async def wait_for_space(self) -> None:
+        await self._paused.wait()
+        await self._paused.clear()
 
     async def pop(self, max_length: int) -> bytes | memoryview:
         length = min(self._size, max_length)
         if length == 0:
-            await self._is_empty.set()
+            if self._size == 0:
+                await self._is_empty.set()
             return b""
 
         remaining = length
@@ -110,7 +123,7 @@ class StreamBuffer:
 class H2SendScheduler:
     def __init__(
         self,
-        connection: object,
+        connection: H2Connection,
         event_class: type[IOEvent],
         flush: Callable[[], Awaitable[None]],
     ) -> None:
@@ -142,21 +155,29 @@ class H2SendScheduler:
             self.priority.block(stream_id)
 
     async def buffer(self, stream_id: int, data: bytes) -> None:
+        stream_buffer = self.stream_buffers[stream_id]
+        should_pause = await stream_buffer.push(data)
+        if self.stream_buffers.get(stream_id) is not stream_buffer:
+            return
+
         self.priority.unblock(stream_id)
         await self.has_data.set()
-        await self.stream_buffers[stream_id].push(data)
+        if should_pause:
+            await stream_buffer.wait_for_space()
 
     async def end(self, stream_id: int) -> None:
-        self.stream_buffers[stream_id].set_complete()
+        stream_buffer = self.stream_buffers[stream_id]
+        stream_buffer.set_complete()
         self.priority.unblock(stream_id)
         await self.has_data.set()
-        await self.stream_buffers[stream_id].drain()
+        await stream_buffer.wait_finished()
 
     async def trailers(self, stream_id: int, headers: list[tuple[bytes, bytes]]) -> None:
-        self.stream_buffers[stream_id].set_trailers(headers)
+        stream_buffer = self.stream_buffers[stream_id]
+        stream_buffer.set_trailers(headers)
         self.priority.unblock(stream_id)
         await self.has_data.set()
-        await self.stream_buffers[stream_id].drain()
+        await stream_buffer.wait_finished()
 
     async def wake(self) -> None:
         await self.has_data.set()
@@ -188,47 +209,66 @@ class H2SendScheduler:
         await self.has_data.set()
 
     async def close_stream(self, stream_id: int) -> None:
-        if stream_id not in self.stream_buffers:
+        stream_buffer = self.stream_buffers.pop(stream_id, None)
+        if stream_buffer is None:
             return
 
-        await self.stream_buffers[stream_id].close()
-        del self.stream_buffers[stream_id]
-        self.priority.remove_stream(stream_id)
+        try:
+            self.priority.remove_stream(stream_id)
+        except priority.MissingStreamError:
+            pass
+        await stream_buffer.close()
         await self.has_data.set()
 
     async def _send_ready_batch(self, stream_id: int) -> None:
         needs_flush = False
         sends = 0
+        finished_buffers: list[StreamBuffer] = []
 
-        while sends < MAX_BATCHED_SENDS:
-            needs_flush |= await self._send_data(stream_id)
-            sends += 1
+        try:
+            while sends < MAX_BATCHED_SENDS:
+                send_needs_flush, finished_buffer = await self._send_data(stream_id)
+                needs_flush |= send_needs_flush
+                if finished_buffer is not None:
+                    finished_buffers.append(finished_buffer)
+                sends += 1
 
-            try:
-                stream_id = next(self.priority)
-            except priority.DeadlockError:
-                break
+                try:
+                    stream_id = next(self.priority)
+                except priority.DeadlockError:
+                    break
 
-        if needs_flush:
-            await self.flush()
+            if needs_flush:
+                await self.flush()
+        finally:
+            for stream_buffer in finished_buffers:
+                await stream_buffer.finish()
 
-    async def _send_data(self, stream_id: int) -> bool:
+    async def _send_data(self, stream_id: int) -> tuple[bool, StreamBuffer | None]:
         needs_flush = False
+        stream_buffer = self.stream_buffers.get(stream_id)
+        if stream_buffer is None:
+            return False, None
+
         try:
             chunk_size = min(
                 self.connection.local_flow_control_window(stream_id),
                 self.connection.max_outbound_frame_size,
             )
             chunk_size = max(0, chunk_size)
-            data = await self.stream_buffers[stream_id].pop(chunk_size)
+            data = await stream_buffer.pop(chunk_size)
+            if self.stream_buffers.get(stream_id) is not stream_buffer:
+                return False, None
+
             if data:
                 self.connection.send_data(stream_id, data)
                 needs_flush = True
             else:
                 self.priority.block(stream_id)
 
-            if self.stream_buffers[stream_id].complete:
-                trailers = self.stream_buffers[stream_id].trailers
+            finished_buffer = None
+            if stream_buffer.complete:
+                trailers = stream_buffer.trailers
                 if trailers is None:
                     self.connection.end_stream(stream_id)
                 else:
@@ -236,8 +276,14 @@ class H2SendScheduler:
                 needs_flush = True
                 del self.stream_buffers[stream_id]
                 self.priority.remove_stream(stream_id)
-        except (h2.exceptions.StreamClosedError, KeyError, h2.exceptions.ProtocolError):
+                finished_buffer = stream_buffer
+        except (
+            h2.exceptions.StreamClosedError,
+            KeyError,
+            priority.MissingStreamError,
+            h2.exceptions.ProtocolError,
+        ):
             await self.close_stream(stream_id)
-            return False
+            return False, None
 
-        return needs_flush
+        return needs_flush, finished_buffer

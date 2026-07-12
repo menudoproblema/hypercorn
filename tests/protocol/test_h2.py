@@ -4,6 +4,7 @@ import asyncio
 from unittest.mock import AsyncMock, call, Mock
 
 import pytest
+import trio
 from h2.connection import H2Connection
 from h2.events import ConnectionTerminated, DataReceived
 
@@ -14,6 +15,7 @@ from hypercorn.protocol.events import Body, StreamClosed
 from hypercorn.protocol.h2 import BUFFER_HIGH_WATER, BufferCompleteError, H2Protocol, StreamBuffer
 from hypercorn.protocol.h2_send import H2SendScheduler
 from hypercorn.protocol.queued_stream import QueuedStream
+from hypercorn.trio.worker_context import EventWrapper as TrioEventWrapper
 from hypercorn.typing import ConnectionState
 
 
@@ -36,21 +38,41 @@ class DummyTaskGroup:
 
 @pytest.mark.asyncio
 async def test_stream_buffer_push_and_pop() -> None:
-    event_loop: asyncio.AbstractEventLoop = asyncio.get_running_loop()
-
     stream_buffer = StreamBuffer(EventWrapper)
+    should_pause = await stream_buffer.push(b"a" * (BUFFER_HIGH_WATER + 1))
+    assert should_pause is True
 
-    async def _push_over_limit() -> bool:
-        await stream_buffer.push(b"a" * (BUFFER_HIGH_WATER + 1))
+    async def _wait_for_space() -> bool:
+        await stream_buffer.wait_for_space()
         return True
 
-    task = event_loop.create_task(_push_over_limit())
+    task = asyncio.create_task(_wait_for_space())
     await asyncio.sleep(0)
     assert not task.done()  # Blocked as over high water
     await stream_buffer.pop(BUFFER_HIGH_WATER // 4)
     assert not task.done()  # Blocked as over low water
     await stream_buffer.pop((BUFFER_HIGH_WATER // 4) + 1)
     assert (await task) is True
+
+
+@pytest.mark.asyncio
+async def test_send_scheduler_applies_backpressure_after_waking_sender() -> None:
+    connection = Mock()
+    connection.local_flow_control_window.return_value = BUFFER_HIGH_WATER
+    connection.max_outbound_frame_size = BUFFER_HIGH_WATER
+    scheduler = H2SendScheduler(connection, EventWrapper, AsyncMock())
+    scheduler.register_stream(1)
+
+    buffering = asyncio.create_task(scheduler.buffer(1, b"a" * (BUFFER_HIGH_WATER + 1)))
+    await asyncio.sleep(0)
+    assert not buffering.done()
+
+    await scheduler._send_ready_batch(1)
+    await buffering
+    assert connection.send_data.call_count == 2
+    assert sum(len(call.args[1]) for call in connection.send_data.call_args_list) == (
+        BUFFER_HIGH_WATER + 1
+    )
 
 
 @pytest.mark.asyncio
@@ -190,6 +212,77 @@ async def test_send_scheduler_sends_trailers_without_body() -> None:
     connection.send_headers.assert_called_once_with(1, [], end_stream=True)
     connection.end_stream.assert_not_called()
     flush.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_send_scheduler_zero_window_does_not_finish_or_discard_data() -> None:
+    connection = Mock()
+    connection.local_flow_control_window.return_value = 0
+    connection.max_outbound_frame_size = 5
+    flush = AsyncMock()
+    scheduler = H2SendScheduler(connection, EventWrapper, flush)
+
+    scheduler.register_stream(1)
+    await scheduler.buffer(1, b"hello")
+    ending = asyncio.create_task(scheduler.end(1))
+    await asyncio.sleep(0)
+
+    await scheduler._send_ready_batch(1)
+    await asyncio.sleep(0)
+
+    assert not ending.done()
+    assert scheduler.stream_buffers[1]._size == 5
+    connection.send_data.assert_not_called()
+    flush.assert_not_awaited()
+
+    connection.local_flow_control_window.return_value = 5
+    await scheduler.window_updated(1)
+    await scheduler._send_ready_batch(1)
+    await ending
+
+    connection.send_data.assert_called_once()
+    connection.end_stream.assert_called_once_with(1)
+    flush.assert_awaited_once()
+
+
+@pytest.mark.trio
+async def test_send_scheduler_trio_queues_data_before_waking_sender() -> None:
+    connection = Mock()
+    connection.local_flow_control_window.return_value = 16_384
+    connection.max_outbound_frame_size = 16_384
+    sent = trio.Event()
+    connection.send_data.side_effect = lambda *args: sent.set()
+    scheduler = H2SendScheduler(connection, TrioEventWrapper, AsyncMock())
+    scheduler.register_stream(1)
+
+    async with trio.open_nursery() as nursery:
+        nursery.start_soon(scheduler.run, lambda: False)
+        await trio.sleep(0)
+
+        await scheduler.buffer(1, b"streaming chunk")
+        with trio.fail_after(0.1):
+            await sent.wait()
+
+        nursery.cancel_scope.cancel()
+
+    assert connection.send_data.call_count == 1
+    assert bytes(connection.send_data.call_args.args[1]) == b"streaming chunk"
+
+
+@pytest.mark.trio
+async def test_send_scheduler_trio_close_does_not_race_with_send() -> None:
+    for _ in range(50):
+        connection = Mock()
+        connection.local_flow_control_window.return_value = 16_384
+        connection.max_outbound_frame_size = 16_384
+        scheduler = H2SendScheduler(connection, TrioEventWrapper, AsyncMock())
+        scheduler.register_stream(1)
+        await scheduler.stream_buffers[1].push(b"data")
+        scheduler.priority.unblock(1)
+
+        async with trio.open_nursery() as nursery:
+            nursery.start_soon(scheduler._send_ready_batch, 1)
+            nursery.start_soon(scheduler.close_stream, 1)
 
 
 @pytest.mark.asyncio
