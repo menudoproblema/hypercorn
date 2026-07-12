@@ -19,13 +19,22 @@ class BufferCompleteError(Exception):
 
 
 class StreamBuffer:
-    __slots__ = ("_chunks", "_head_offset", "_size", "_complete", "_is_empty", "_paused")
+    __slots__ = (
+        "_chunks",
+        "_head_offset",
+        "_size",
+        "_complete",
+        "_trailers",
+        "_is_empty",
+        "_paused",
+    )
 
     def __init__(self, event_class: type[IOEvent]) -> None:
         self._chunks: deque[memoryview] = deque()
         self._head_offset = 0
         self._size = 0
         self._complete = False
+        self._trailers: list[tuple[bytes, bytes]] | None = None
         self._is_empty = event_class()
         self._paused = event_class()
 
@@ -35,17 +44,26 @@ class StreamBuffer:
     def set_complete(self) -> None:
         self._complete = True
 
+    def set_trailers(self, headers: list[tuple[bytes, bytes]]) -> None:
+        self._trailers = headers
+        self._complete = True
+
     async def close(self) -> None:
         self._complete = True
         self._chunks = deque()
         self._head_offset = 0
         self._size = 0
+        self._trailers = None
         await self._is_empty.set()
         await self._paused.set()
 
     @property
     def complete(self) -> bool:
         return self._complete and self._size == 0
+
+    @property
+    def trailers(self) -> list[tuple[bytes, bytes]] | None:
+        return self._trailers
 
     async def push(self, data: bytes) -> None:
         if self._complete:
@@ -135,11 +153,10 @@ class H2SendScheduler:
         await self.stream_buffers[stream_id].drain()
 
     async def trailers(self, stream_id: int, headers: list[tuple[bytes, bytes]]) -> None:
+        self.stream_buffers[stream_id].set_trailers(headers)
         self.priority.unblock(stream_id)
         await self.has_data.set()
         await self.stream_buffers[stream_id].drain()
-        self.connection.send_headers(stream_id, headers, end_stream=True)
-        await self.flush()
 
     async def wake(self) -> None:
         await self.has_data.set()
@@ -211,7 +228,11 @@ class H2SendScheduler:
                 self.priority.block(stream_id)
 
             if self.stream_buffers[stream_id].complete:
-                self.connection.end_stream(stream_id)
+                trailers = self.stream_buffers[stream_id].trailers
+                if trailers is None:
+                    self.connection.end_stream(stream_id)
+                else:
+                    self.connection.send_headers(stream_id, trailers, end_stream=True)
                 needs_flush = True
                 del self.stream_buffers[stream_id]
                 self.priority.remove_stream(stream_id)

@@ -145,6 +145,54 @@ async def test_send_scheduler_batches_flush_across_ready_streams() -> None:
 
 
 @pytest.mark.asyncio
+async def test_send_scheduler_sends_data_before_trailers() -> None:
+    connection = Mock()
+    connection.local_flow_control_window.return_value = 5
+    connection.max_outbound_frame_size = 5
+    flush = AsyncMock()
+    scheduler = H2SendScheduler(connection, EventWrapper, flush)
+    operations: list[str] = []
+    connection.send_data.side_effect = lambda *args: operations.append("data")
+    connection.send_headers.side_effect = lambda *args, **kwargs: operations.append("trailers")
+
+    scheduler.register_stream(1)
+    await scheduler.buffer(1, b"hello")
+    trailers_task = asyncio.create_task(scheduler.trailers(1, [(b"checksum", b"value")]))
+    await asyncio.sleep(0)
+
+    connection.send_headers.assert_not_called()
+    await scheduler._send_ready_batch(1)
+    await trailers_task
+
+    assert operations == ["data", "trailers"]
+    connection.send_headers.assert_called_once_with(1, [(b"checksum", b"value")], end_stream=True)
+    connection.end_stream.assert_not_called()
+    flush.assert_awaited_once()
+    assert 1 not in scheduler.stream_buffers
+
+
+@pytest.mark.asyncio
+async def test_send_scheduler_sends_trailers_without_body() -> None:
+    connection = Mock()
+    connection.local_flow_control_window.return_value = 5
+    connection.max_outbound_frame_size = 5
+    flush = AsyncMock()
+    scheduler = H2SendScheduler(connection, EventWrapper, flush)
+
+    scheduler.register_stream(1)
+    trailers_task = asyncio.create_task(scheduler.trailers(1, []))
+    await asyncio.sleep(0)
+
+    await scheduler._send_ready_batch(1)
+    await trailers_task
+
+    connection.send_data.assert_not_called()
+    connection.send_headers.assert_called_once_with(1, [], end_stream=True)
+    connection.end_stream.assert_not_called()
+    flush.assert_awaited_once()
+
+
+@pytest.mark.asyncio
 async def test_protocol_handle_protocol_error() -> None:
     task_group = DummyTaskGroup()
     protocol = H2Protocol(
