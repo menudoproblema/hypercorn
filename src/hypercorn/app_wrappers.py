@@ -4,6 +4,7 @@ import sys
 from collections.abc import Callable
 from functools import partial
 from io import BytesIO
+from types import TracebackType
 
 from .typing import (
     ASGIFramework,
@@ -92,7 +93,7 @@ class WSGIWrapper:
         def start_response(
             status: str,
             response_headers: list[tuple[str, str]],
-            exc_info: Exception | None = None,
+            exc_info: tuple[type[BaseException], BaseException, TracebackType] | None = None,
         ) -> None:
             nonlocal headers, response_started, status_code, headers_sent
 

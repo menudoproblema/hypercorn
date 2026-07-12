@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 import json
-import re
 import logging
 import os
+import re
 import sys
 import time
 from collections.abc import Mapping
@@ -241,7 +241,9 @@ class AccessLogAtoms(dict):
     def _get_path_with_qs(self) -> str:
         if self._path_with_qs is None:
             query_string = self._get_query_string()
-            self._path_with_qs = self._request["path"] + ("?" + query_string if query_string else "")
+            self._path_with_qs = self._request["path"] + (
+                "?" + query_string if query_string else ""
+            )
         return self._path_with_qs
 
     def _get_status_code(self) -> str:
@@ -275,11 +277,13 @@ class AccessLogAtoms(dict):
         if self._response_header_cache is None:
             self._response_header_cache = {
                 header_name.decode("latin1").lower(): value.decode("latin1")
-                for header_name, value in self._response.get("headers", [])  # type: ignore[arg-type]
+                for header_name, value in self._response.get("headers", [])
             }
         return self._response_header_cache.get(name, "-")
 
     def _get_environ(self, name: str) -> str:
         if self._environ_cache is None:
-            self._environ_cache = {env_name.lower(): value for env_name, value in os.environ.items()}
+            self._environ_cache = {
+                env_name.lower(): value for env_name, value in os.environ.items()
+            }
         return self._environ_cache.get(name, "-")

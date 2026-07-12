@@ -24,9 +24,12 @@ from .events import Body, Data, EndBody, EndData, Event, Request, Response, Stre
 from ..config import Config
 from ..typing import (
     AppWrapper,
+    ASGIReceiveEvent,
     ASGISendEvent,
+    ConnectionState as ASGIConnectionState,
     TaskGroup,
     WebsocketAcceptEvent,
+    WebsocketReceiveEvent,
     WebsocketResponseBodyEvent,
     WebsocketResponseStartEvent,
     WebsocketScope,
@@ -154,7 +157,7 @@ class WebsocketBuffer:
         self.value = None
         self.length = 0
 
-    def to_message(self) -> dict:
+    def to_message(self) -> WebsocketReceiveEvent:
         return {
             "type": "websocket.receive",
             "bytes": self.value.getvalue() if isinstance(self.value, BytesIO) else None,
@@ -176,7 +179,7 @@ class WSStream:
         stream_id: int,
     ) -> None:
         self.app = app
-        self.app_put: Callable | None = None
+        self.app_put: Callable[[ASGIReceiveEvent], Awaitable[None]] | None = None
         self.buffer = WebsocketBuffer(config.websocket_max_message_size)
         self.client = client
         self.closed = False
@@ -207,7 +210,7 @@ class WSStream:
             self.start_time = time()
             self.handshake = Handshake(event.headers, event.http_version)
             path, _, query_string = event.raw_path.partition(b"?")
-            self.scope = {
+            scope: WebsocketScope = {
                 "type": "websocket",
                 "asgi": {"spec_version": "2.3", "version": "3.0"},
                 "scheme": self.scheme,
@@ -219,10 +222,11 @@ class WSStream:
                 "headers": event.headers,
                 "client": self.client,
                 "server": self.server,
-                "state": event.state.copy(),  # type: ignore[typeddict-item]
+                "state": ASGIConnectionState(event.state.copy()),
                 "subprotocols": self.handshake.subprotocols or [],
                 "extensions": {"websocket.http.response": {}},
             }
+            self.scope = scope
 
             if not valid_server_name(self.config, event):
                 await self._send_error_response(404)
@@ -232,7 +236,7 @@ class WSStream:
                 self.closed = True
             else:
                 self.app_put = await self.task_group.spawn_app(
-                    self.app, self.config, self.scope, self.app_send
+                    self.app, self.config, scope, self.app_send
                 )
                 await self.app_put({"type": "websocket.connect"})
         elif isinstance(event, (Body, Data)) and (

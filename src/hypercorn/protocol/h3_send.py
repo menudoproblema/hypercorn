@@ -3,10 +3,19 @@ from __future__ import annotations
 from collections import deque
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
+from typing import Protocol
 
 from ..typing import Event as IOEvent
 
 MAX_BATCHED_SENDS = 32
+
+
+class H3Connection(Protocol):
+    def send_headers(
+        self, stream_id: int, headers: list[tuple[bytes, bytes]], end_stream: bool = False
+    ) -> None: ...
+
+    def send_data(self, stream_id: int, data: bytes, end_stream: bool) -> None: ...
 
 
 class H3SendClosedError(RuntimeError):
@@ -23,7 +32,7 @@ class _QueuedOperation:
 class H3SendScheduler:
     def __init__(
         self,
-        connection: object,
+        connection: H3Connection,
         event_class: type[IOEvent],
         flush: Callable[[], Awaitable[None]],
     ) -> None:
@@ -51,9 +60,7 @@ class H3SendScheduler:
     async def headers(
         self, stream_id: int, headers: list[tuple[bytes, bytes]], end_stream: bool = False
     ) -> None:
-        await self._enqueue(
-            lambda: self._send_headers(stream_id, headers, end_stream=end_stream)
-        )
+        await self._enqueue(lambda: self._send_headers(stream_id, headers, end_stream=end_stream))
 
     async def data(self, stream_id: int, data: bytes, end_stream: bool = False) -> None:
         await self._enqueue(lambda: self._send_data(stream_id, data, end_stream=end_stream))

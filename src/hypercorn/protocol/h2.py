@@ -6,6 +6,7 @@ import h2
 import h2.connection
 import h2.events
 import h2.exceptions
+
 from .events import (
     Body,
     Data,
@@ -18,8 +19,8 @@ from .events import (
     StreamClosed,
     Trailers,
 )
-from .http_stream import HTTPStream
 from .h2_send import BUFFER_HIGH_WATER, BufferCompleteError, H2SendScheduler, StreamBuffer
+from .http_stream import HTTPStream
 from .queued_stream import QueuedStream
 from .ws_stream import WSStream
 from ..config import Config
@@ -67,9 +68,7 @@ class H2Protocol:
         self.server = server
         self.ssl = ssl
         self.streams: dict[int, QueuedStream] = {}
-        self.sender = H2SendScheduler(
-            self.connection, self.context.event_class, self._flush
-        )
+        self.sender = H2SendScheduler(self.connection, self.context.event_class, self._flush)
 
     @property
     def idle(self) -> bool:
@@ -155,11 +154,16 @@ class H2Protocol:
                     self.connection.close_connection()
             elif isinstance(event, h2.events.DataReceived):
                 try:
+
+                    async def acknowledge_data(
+                        length: int = event.flow_controlled_length,
+                        stream_id: int = event.stream_id,
+                    ) -> None:
+                        await self._acknowledge_data(length, stream_id)
+
                     await self.streams[event.stream_id].handle(
                         Body(stream_id=event.stream_id, data=event.data),
-                        lambda length=event.flow_controlled_length, stream_id=event.stream_id: self._acknowledge_data(
-                            length, stream_id
-                        ),
+                        acknowledge_data,
                     )
                 except KeyError:
                     # Data received while already closed, nothing to do.
